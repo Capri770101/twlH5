@@ -1,6 +1,6 @@
 # 跳舞兰AI花店 · H5
 
-小程序（`miniapp/`）视觉风格的 H5 移植版。技术栈 **Vue 3 + Vite + Sass**。
+AI 驱动的线上花店 H5，提供选花、下单、店铺浏览与 AI 花艺顾问一站式体验。技术栈 **Vue 3 + Vite + Sass**。
 
 数据层采用「前端 mock + 可选 Node 只读后端」双轨：
 - 默认走 `src/mock/` 假数据，开箱即用；
@@ -23,11 +23,11 @@ npm run dev:all
 cd server && npm install && npm run start   # 默认 http://localhost:4000
 ```
 
-## 移植规则（重要）
+## 前端开发约定（重要）
 
 ### 1. 尺寸：rpx → rem
 
-小程序的 `rpx` 基于 **750 设计稿**。H5 约定 `1rem = 容器宽度`（上限 480px，见 `index.html` 的 `setRem`），因此：
+本项目采用 **750 宽设计稿**。`1rem = 容器宽度`（上限 480px，见 `index.html` 的 `setRem`），因此：
 
 ```
 n rpx = n / 750 rem
@@ -44,7 +44,7 @@ n rpx = n / 750 rem
 
 ### 2. 字号：不用变量，直接写数值
 
-小程序 `app.wxss` 定义了 `--font-xs`~`--font-title`，但 26 个页面 651 处 `font-size` 全是硬编码 rpx，变量一次没用。移植时按频率固化：
+项目按出现频率固化了一套字号约定（不引入变量，直接写数值）：
 
 | 用途 | rpx | 字重 |
 |---|---|---|
@@ -58,26 +58,18 @@ n rpx = n / 750 rem
 
 ### 3. 图标：emoji + CSS 伪元素，没有 iconfont
 
-小程序不依赖图标字体，全部是 emoji（🌸 ⌖ ⌂ ⭐ ✓ ↗ 等）+ CSS 伪元素画的线稿（4rpx 描边 + `currentColor`）。已 1:1 复刻在 `src/styles/base.scss` 的「线稿图标」区：`line-search-mark` / `location-pin` / `arrow-back` / `arrow-down` / `arrow-right`。
+项目不依赖图标字体，全部用 emoji（🌸 ⌖ ⌂ ⭐ ✓ ↗ 等）+ CSS 伪元素画的线稿（4rpx 描边 + `currentColor`），统一维护在 `src/styles/base.scss` 的「线稿图标」区：`line-search-mark` / `location-pin` / `arrow-back` / `arrow-down` / `arrow-right`。
 
-### 4. 结构映射
+### 4. 布局约定
 
-| 小程序 | H5 |
-|---|---|
-| `page` 元素 | `.twd-app` 容器 |
-| `wx:for` | `v-for` |
-| `wx:if` | `v-if` |
-| `<view>` / `<text>` | `<div>` / `<span>` |
-| `<image>` | `<img>`（用 `FlowerImage.vue` 包一层，加载失败降级为 emoji） |
-| `<scroll-view scroll-x>` | `overflow-x: auto` + `white-space: nowrap` |
-| `<swiper>` | `scroll-snap-type: x mandatory` + 定时器自动播放 |
-| 原生 `tabBar` | `components/TabBar.vue` |
-| 原生导航栏 | `components/NavBar.vue`（sticky，88rpx 高） |
-| `position: fixed` 底部栏 | 需额外 `left: 50%; transform: translateX(-50%); width: 1rem` 对齐居中容器 |
+- 页面根容器 `.twd-app`：移动端居中，宽度上限 480px
+- 横向滚动：`overflow-x: auto` + `white-space: nowrap`；轮播图用 `scroll-snap-type: x mandatory` + 定时器自动播放
+- 底部固定操作栏：需额外 `left: 50%; transform: translateX(-50%); width: 1rem`，否则会以视口为基准、和居中的 `.twd-app` 容器错位
+- 图片用 `FlowerImage.vue` 包一层，`<img>` 加载失败降级为 emoji
 
-### 5. 商品图缺失
+### 5. 商品图降级
 
-小程序包里只有 tab 图标和 logo，商品图不存在，统一走 `FlowerImage` 的 emoji 降级。接入真实图片 URL / CDN 后自动恢复正常。
+商品图走 `FlowerImage` 的 emoji 降级。接入真实图片 URL / CDN 后自动恢复正常。
 
 ## 目录
 
@@ -95,7 +87,7 @@ n rpx = n / 750 rem
 │  │                      #   Checkout(结算) Orders(订单列表) OrderDetail(订单详情)
 │  │                      #   ShopDetail(店铺详情) Shops(全部花店)
 │  │                      #   Profile(我的/个人中心) Login(登录) Settings(账户设置) Advisor(顾问)
-│  ├─ mock/                # data.js(小程序 mock 原样搬运) api.js(含 realApi 真实接口层) regions.js(省市区)
+│  ├─ mock/                # data.js(内置 mock 数据) api.js(含 realApi 真实接口层) regions.js(省市区)
 │  ├─ store.js             # 购物车 / 地址 / 登录态（localStorage 持久化）
 │  └─ router/index.js
 └─ server/                 # Node 只读后端（MySQL），持有库连接，供前端 /api 调用
