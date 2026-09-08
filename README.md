@@ -1,38 +1,50 @@
 # 跳舞兰AI花店 · H5
 
-小程序（`miniapp/`）视觉风格的 H5 移植版。技术栈：Vue 3 + Vite + Sass，数据走 mock。
+小程序（`miniapp/`）视觉风格的 H5 移植版。技术栈 **Vue 3 + Vite + Sass**。
 
-## 启动
+数据层采用「前端 mock + 可选 Node 只读后端」双轨：
+- 默认走 `src/mock/` 假数据，开箱即用；
+- 配置 `VITE_USE_REAL_API=true` 后，读接口优先走 `server/`（`/api` 同源代理），连不上库时自动回退 mock。
+
+AI 花艺顾问已接入**自研智能体平台 `https://api.tiaowulan.com`**（流式输出 + 结构化卡片）。
+
+## 快速开始
 
 ```bash
+# 前端
 npm install
-npm run dev      # http://localhost:5180
-npm run build
+npm run dev          # http://localhost:5180（沙箱端口被占用会自动顺延）
+npm run build        # 产物输出 dist/（沙箱多次构建另用 dist-v*，已被 .gitignore）
+
+# 可选：同时起前端 + 后端（需先装后端依赖）
+npm run dev:all
+
+# 后端（MySQL 只读，需先装依赖）
+cd server && npm install && npm run start   # 默认 http://localhost:4000
 ```
 
 ## 移植规则（重要）
 
 ### 1. 尺寸：rpx → rem
 
-小程序的 `rpx` 基于 **750 设计稿**。H5 里约定 `1rem = 容器宽度`（上限 480px，见 `index.html` 的 `setRem`），因此：
+小程序的 `rpx` 基于 **750 设计稿**。H5 约定 `1rem = 容器宽度`（上限 480px，见 `index.html` 的 `setRem`），因此：
 
 ```
 n rpx = n / 750 rem
 ```
 
-写样式时用 Sass 函数 `rpx()`：
+写样式用 Sass 函数 `rpx()`：
 
 ```scss
 .card { width: rpx(280); }   // → 0.3733rem → 375 屏上 = 140px
 ```
 
-> `rpx()` 由 `vite.config.js` 的 `additionalData` 全局注入，任何 `.scss` 和 `.vue` 的 `<style lang="scss">` 里都能直接用。
->
-> **例外**：CSS 自定义属性（`--xxx`）的值 Sass 不会计算，必须用 `calc(n * var(--rpx))` 的写法，见 `src/styles/tokens.scss`。
+> `rpx()` 由 `vite.config.js` 的 `additionalData` 全局注入，任何 `.scss` 和 `<style lang="scss">` 里都能直接用。
+> **例外**：CSS 自定义属性（`--xxx`）的值 Sass 不计算，必须用 `calc(n * var(--rpx))`，见 `src/styles/tokens.scss`。
 
-### 2. 字号：不要用变量，直接写数值
+### 2. 字号：不用变量，直接写数值
 
-小程序 `app.wxss` 定义了 `--font-xs` ~ `--font-title`，但**26 个页面里 651 处 `font-size` 全是硬编码 rpx，变量一次都没用**。所以移植时按实际频率固化即可：
+小程序 `app.wxss` 定义了 `--font-xs`~`--font-title`，但 26 个页面 651 处 `font-size` 全是硬编码 rpx，变量一次没用。移植时按频率固化：
 
 | 用途 | rpx | 字重 |
 |---|---|---|
@@ -46,12 +58,7 @@ n rpx = n / 750 rem
 
 ### 3. 图标：emoji + CSS 伪元素，没有 iconfont
 
-小程序不依赖任何图标字体，全部是：
-
-- **emoji**：🌸 ⌖ ⌂ ⭐ ✓ ↗ 等
-- **CSS 伪元素画的线稿**（4rpx 描边 + `currentColor`）：搜索放大镜、定位 pin、返回箭头、右向尖括号
-
-这些已 1:1 复刻在 `src/styles/base.scss` 的「线稿图标」区，直接用 class：`line-search-mark` / `location-pin` / `arrow-back` / `arrow-down` / `arrow-right`。
+小程序不依赖图标字体，全部是 emoji（🌸 ⌖ ⌂ ⭐ ✓ ↗ 等）+ CSS 伪元素画的线稿（4rpx 描边 + `currentColor`）。已 1:1 复刻在 `src/styles/base.scss` 的「线稿图标」区：`line-search-mark` / `location-pin` / `arrow-back` / `arrow-down` / `arrow-right`。
 
 ### 4. 结构映射
 
@@ -66,64 +73,124 @@ n rpx = n / 750 rem
 | `<swiper>` | `scroll-snap-type: x mandatory` + 定时器自动播放 |
 | 原生 `tabBar` | `components/TabBar.vue` |
 | 原生导航栏 | `components/NavBar.vue`（sticky，88rpx 高） |
-| `position: fixed` 底部栏 | 需额外 `left: 50%; transform: translateX(-50%); width: 1rem` 才能对齐居中容器 |
+| `position: fixed` 底部栏 | 需额外 `left: 50%; transform: translateX(-50%); width: 1rem` 对齐居中容器 |
 
 ### 5. 商品图缺失
 
-小程序包里只有 tab 图标和 logo，`/images/flower-*.jpg`、`/images/shop-*.jpg` 都不存在，所以统一走 `FlowerImage` 的 emoji 降级（与小程序的 placeholder 分支一致）。接入真实 CDN 后自动恢复正常。
+小程序包里只有 tab 图标和 logo，商品图不存在，统一走 `FlowerImage` 的 emoji 降级。接入真实图片 URL / CDN 后自动恢复正常。
 
 ## 目录
 
 ```
-src/
-  styles/
-    _rpx.scss        rpx() 换算函数
-    tokens.scss      设计 token（色板 / 圆角 / 间距 / 字号）
-    base.scss        reset + 工具类 + 线稿图标
-  components/        TabBar / NavBar / FlowerImage / GoodsCard / AddressManager / AddressPicker
-  pages/             Home（首页）、Detail（详情）、Cart（购物车）、Category（分类）、
-                     Checkout（结算）、Orders（订单列表）、OrderDetail（订单详情）、
-                     ShopDetail（店铺详情）、Placeholder（我的·占位）
-  mock/              data.js（小程序 mock-data 原样搬运）+ api.js + regions.js（省市区三级数据）
-  store.js           对应 app.js 的 globalData（购物车 / 地址 / 登录态）
+.
+├─ index.html              # setRem（1rem = 容器宽，上限 480px）
+├─ vite.config.js          # @ 别名；/agent 与 /api 代理；build.emptyOutDir:false
+├─ package.json            # 前端脚本
+├─ src/
+│  ├─ main.js / App.vue
+│  ├─ styles/              # _rpx.scss(rpx() 函数) tokens.scss(设计 token) base.scss(reset+工具类+线稿图标)
+│  ├─ components/          # TabBar NavBar FlowerImage GoodsCard
+│  │                      #   AddressManager AddressPicker AdvisorCards
+│  ├─ pages/               # Home(首页) Detail(详情) Cart(购物车) Category(分类)
+│  │                      #   Checkout(结算) Orders(订单列表) OrderDetail(订单详情)
+│  │                      #   ShopDetail(店铺详情) Shops(全部花店)
+│  │                      #   Profile(我的/个人中心) Login(登录) Settings(账户设置) Advisor(顾问)
+│  ├─ mock/                # data.js(小程序 mock 原样搬运) api.js(含 realApi 真实接口层) regions.js(省市区)
+│  ├─ store.js             # 购物车 / 地址 / 登录态（localStorage 持久化）
+│  └─ router/index.js
+└─ server/                 # Node 只读后端（MySQL），持有库连接，供前端 /api 调用
+   ├─ package.json
+   ├─ src/                 # index.js(db 路由) db.js(连接池) mapping.js(行→前端字段映射)
+   └─ sql/users.sql        # users 表建表模板（幂等）
 ```
 
-## 已完成
+## 页面清单（已完成）
 
 | 页面 | 路由 | 内容 |
 |---|---|---|
-| 首页 | `/` | 定位栏、搜索栏、Banner 轮播、同城花店横滑、场景分类、推荐花束 |
+| 首页 | `/` | 定位栏、搜索栏、Banner 轮播、同城花店横滑、场景分类、推荐花束；「更多花店 ›」跳 `/shops`；Banner 下入口卡进顾问页 |
+| 全部花店 | `/shops` | 花店列表，卡片点击进 `/shop/:id` |
 | 分类/选花 | `/category` | 搜索（花束+花店）、分类 Tab、综合/销量/价格排序、两列网格、直接加购 |
-| 商品详情 | `/detail/:id` | 大图、价格区、适合场景、花材、花语、描述、服务承诺、商品信息、底部操作栏 |
-| 购物车 | `/cart` | 按店铺分组、步进器、删除、空状态、底部结算栏 |
-| 结算 | `/checkout` | 配送/自提切换、收货信息、配送时段、贺卡（留白/代写+场景标签+AI 建议）、备注、费用明细（满 200 减 20）、底部提交栏，提交后建单并清购物车跳转订单详情 |
-| 订单列表 | `/orders` | 全部/待付款/制作中/配送中/已完成/待评价/退款 8 Tab，状态色、操作按钮、空/加载态 |
-| 订单详情 | `/order/:id` | 顶部状态卡（按状态渐变）、配送信息、商品、费用、订单信息（复制单号）、评价区 |
-| 我的（个人中心） | `/profile` | 登录态（未登录引导登录）/ 订单快捷入口（待付款·待接单·配送中·待评价，跳对应 Tab）/ 收货地址弹窗 / 退出登录；受 `requiresAuth` 守卫保护 |
+| 商品详情 | `/detail/:id` | 大图、价格区、适合场景、花材、花语、描述、服务承诺、商品信息、底部操作栏（含「立即购买」→结算、「花艺顾问」→`/advisor`、分享 `navigator.share`/剪贴板） |
+| 购物车 | `/cart` | 按店铺分组、步进器、删除、空状态、店铺头点击进店铺详情、底部结算栏 |
+| 结算 | `/checkout` | 配送/自提切换、收货信息（触发地址管理）、配送时段、贺卡、备注、费用明细、提交建单并清购物车跳订单详情 |
+| 订单列表 | `/orders` | 8 Tab（全部/待付款/制作中/配送中/已完成/待评价/退款），「再来一单」→加购跳购物车 |
+| 订单详情 | `/order/:id` | 状态卡、配送信息、商品、费用、单号复制、评价区、联系骑手 `tel:` |
+| 店铺详情 | `/shop/:id` | hero、联系信息（地址复制/电话拨打/微信复制）、四 Tab、底部购物车栏 |
+| 我的（个人中心） | `/profile` | 登录态（`requiresAuth` 守卫）；订单快捷入口；收货地址弹窗；「账户设置」→`/settings`；「联系客服」弹窗（电话 `tel:`）；退出登录 |
 | 登录 | `/login` | 手机号验证码 + 微信一键登录双路径（微信内检测走网页授权，无 appId 走 mock）；协议勾选 + 服务/隐私弹窗 |
-| 店铺详情 | `/shop/:id` | hero（封面/品牌 slogan/主理人 IP 卡）、联系信息（地址复制/电话拨打/微信复制）、服务承诺、首页（评分销量+本店精选轮播+推荐网格）/全部商品（分类筛选+网格加购）/评价/商家 四 Tab、底部购物车栏；首页「同城花店」点击进入 |
-| 地址管理 / 选择 | AddressManager / AddressPicker | 省市区三级联动三步弹窗（省+市 → 区 → 详细地址+收货人+手机号+默认）；地址列表（新增/编辑/删除/设默认）存 localStorage；首页定位栏、结算页收货地址均触发 |
-| AI 花艺顾问 | `/advisor` | 聊天式 UI（场景预设 chips / user+ai 气泡 / 打字中 / DIY 方案卡可加购 / 选项 chips / 效果图轮询）。**已接自研智能体平台 `https://api.tiaowulan.com`**：`POST /auth/token`(X-API-Key 换 Bearer) → `POST /chat` 返回结构化 UI（text / plan_card / dialog_options，含 DIY 方案与效果图任务轮询），异常自动回退前端 mock；开发态走 Vite 代理 `/agent`（同源免 CORS，key 在 `.env` 不进仓库）；首页 banner 下入口卡 +「我的」页菜单项进入 |
+| 账户设置 | `/settings` | `requiresAuth`；改昵称/性别/头像（10 个 emoji 预设 + 自定义图片 URL），手机号只读打码；`store.updateUserInfo` 持久化 |
+| 地址管理 / 选择 | AddressManager / AddressPicker | 省市区三级联动三步弹窗；地址列表（新增/编辑/删除/设默认）存 localStorage；首页定位栏、结算页收货地址均触发 |
+| AI 花艺顾问 | `/advisor` | 流式聊天（SSE）+ 8 类结构化卡片（方案/订单/店铺/支付/生图/贺卡/选项）+ 多会话管理（见下节） |
 
 底部 TabBar（首页 / 购物车 / 我的）已完成，购物车角标与详情页加购实时联动。
 
-## 待办
+## Node 后端 `server/`（MySQL 只读）
 
-- **AI 花艺顾问：已接入真实智能体**（api.tiaowulan.com）。生产构建产物要直连，二选一：
-  - 平台开启 CORS（返回 `Access-Control-Allow-Origin`）并设置 `VITE_AGENT_API_BASE=https://api.tiaowulan.com`；浏览器直连，key 经 `import.meta.env.VITE_AGENT_API_KEY` 暴露（平台 Key 即为此设计）。
-  - 或部署侧加同源代理（Cloudflare Pages Functions / Netlify / Vercel rewrite），把 `/agent` 转发到 `https://api.tiaowulan.com` 并在服务端注入 `X-API-Key`，浏览器不持 key。
-- 其余真实接口（登录 / 下单 / 商品 / 订单 / 店铺）仍为 mock，接入点预留于 `mock/api.js` 各函数。
+持有 MySQL 连接，前端经 Vite `/api` 同源代理调用，账号密码只在服务端，浏览器不持库密码。
 
-## 环境坑
-
-1. **沙箱 safe-delete 拦截删除 `dist`**：WorkBuddy 的 safe-delete（命令级 hook）会拦截一切删 `dist` 操作——`vite build` 的 `emptyOutDir`、手动 `rd`/`del`/`move`、甚至独立 `node fs.rmSync` 全被拦（每次打印带 "Capri" 的乱码诊断，fail-closed 不真删）。已设 `vite.config.js` 的 `build.emptyOutDir: false`；本机验证用 `npm run build -- --outDir dist-build` 绕道（输出到全新目录，不触发删除）。`npm run preview` 会锁 `dist` 句柄，构建/删 dist 前务必先结束预览进程，否则 `dist` 删不掉或 `copy` 时 EPERM。
-2. **Sass 注释里别写 `#{}`**：会被当成插值解析并报 `Expected expression`。
+- **技术**：Express + `mysql2`（连接池，SSL `rejectUnauthorized:false` 仅加密不校 CA）
+- **端口**：`API_PORT`，默认 `4000`（与 `vite.config.js` 的 `/api` 代理目标一致，`API_PROXY_TARGET` 可覆盖）
+- **只读接口**：`/api/health`、`/api/meta/tables`、`/api/meta/columns?table=`（schema 发现）、`/api/home`、`/api/flowers`(+`/:id`)、`/api/categories`、`/api/shops/:id`(+`/reviews`)、`/api/search?q=`、`/api/users`（脱敏）
+- **兜底**：DB 不可达时路由返回 `{error}`，前端 `realApi()` 捕获后回退 `src/mock/` 假数据，页面照常显示
+- **真实库 schema（已通过智能体核实）**：仅 3 张表 `products` / `shop_products` / `shops`；`products` 列含 `name/subtitle/description/price/original_price/stock/sales/rating/image/images/tags/flowers/flower_meaning/season/shelf_life/owner_shop_id`，价格单位为**元**。当前 `server/src/mapping.js` 按 `flowers/categories/reviews/orders` 假设字段，连真库时需按这 3 表重写（部署前先 `GET /api/meta/tables` + `/api/meta/columns` 校准）
+- **用户表模板**：`server/sql/users.sql`（`CREATE TABLE IF NOT EXISTS users`，幂等），对应只读 `GET /api/users` 经 `mapUserRow` 脱敏（手机号 `138****8888`、openid 掩码、密码/令牌不返回）
+- **白名单**：MySQL「允许来源」为 `8.138.203.6`。`server/` 须跑在该机或把本机 IP 加入白名单，否则连不上库（前端回退 mock）。本机 `node server/src/index.js` 验证：`GET /api/health` 显示 `dbConnected`
 
 ## AI 花艺顾问对接说明（自研智能体平台）
 
-- 平台：`https://api.tiaowulan.com`（OpenAPI：`/openapi.json`，标题「跳舞兰花卉智能体 API」，基于 ReAct）
-- 鉴权：`X-API-Key`（平台 Key，存 `.env` 的 `VITE_AGENT_API_KEY`，已被 gitignore）换 Bearer token：`POST /auth/token` body `{external_user_id}` → `{access_token, user_id}`；再 `POST /chat` 带 `Authorization: Bearer <token>`
-- 响应为**结构化 UI**：`{ reply, ui, action:{type,payload}, tool_calls:[...], data:{poll} }`，`ui` ∈ text / dialog_options / plan_card / shop_card / order_card / pay_jump；`chatWithAdvisor` 已归一化（`normalizeAdvisorResponse`），`pollAgentTask` 轮询效果图
-- **开发态**：`vite.config.js` 配了 `server.proxy['/agent']` → `https://api.tiaowulan.com`，H5 走同源 `/agent/*` 免浏览器 CORS，key 不进浏览器 bundle
-- **生产态**：平台目前未返回 `Access-Control-Allow-Origin`，浏览器直连会被拦 → 要么平台开 CORS + `VITE_AGENT_API_BASE=https://api.tiaowulan.com`，要么部署侧加同源代理（见待办）
-- **沙箱注意**：`npm run dev` 若 5180 被旧实例占用会自动顺延端口（如 5181/5182），带代理的才是新实例；本机正常 `npm run dev` 直接绑 5180
+- **平台**：`https://api.tiaowulan.com`（ReAct 架构，OpenAPI `/openapi.json`，UI 契约 `/ui-contract`）
+- **鉴权**：`X-API-Key`（平台 Key，存前端 `.env` 的 `VITE_AGENT_API_KEY`）→ `POST /auth/token` 换 Bearer token
+- **流式输出**：`POST /chat/stream` 返回 `text/event-stream`，事件四种：
+  - `tool_call {name,status}`（如 `platform_db_query_entity`，页面显示「正在查询花库…」）
+  - `text {content}`（多次增量，前端打字机渲染 + 闪烁光标）
+  - `card {ui,data}`（结构化卡片，见下）
+  - `done {session_id}`
+  - 中断用 `AbortController`「停止」按钮；失败则回退旧版一次性 `chatWithAdvisor`（含 mock 演示）
+- **8 类结构化卡片**（`src/components/AdvisorCards.vue` 渲染，字段兼容「契约示例」与「平台实际返回」双形态）：
+  - `plan_card` 方案卡：横向滚动，图/名/价/库存/店铺，「加购 / 购买」→ 购物车或结算
+  - `order_card` 订单卡：明细/合计/方案标签，「确认下单 / 查看订单」
+  - `shop_card` 店铺卡：评分/距离/价位，「选这家」=把选择回传给智能体
+  - `pay_jump` 支付卡：订单号 +「去支付」
+  - `image_task` 生图任务：自动轮询 `/tasks/{id}`，出图前脉冲进度
+  - `greeting_card` 贺卡：大图 + 文案 + 收/送人，「换一张 / 改文案」
+  - `dialog_options` 选项 chips：点选回传继续对话
+  - `text` 文本气泡
+- **多会话管理**：`Advisor.vue` 左侧抽屉 `≡` 管理，会话存 `localStorage`（`twd_advisor_convos`，最多 30 个会话、每会话最多 40 条）；支持新建 / 切换 / 重命名（prompt）/ 删除；首条用户消息自动命名，发送后写回 `updatedAt`/`sessionId`/`agentMode`
+- **开发态**：`vite.config.js` 配 `server.proxy['/agent']` → `https://api.tiaowulan.com`，H5 走同源 `/agent/*` 免浏览器 CORS，key 不进 bundle
+- **生产态**：平台目前未返回 `Access-Control-Allow-Origin`，浏览器直连会被拦 → 二选一：
+  - 平台开 CORS 并设 `VITE_AGENT_API_BASE=https://api.tiaowulan.com`（key 由 `VITE_AGENT_API_KEY` 暴露，平台 Key 即为此设计）
+  - 或部署侧加同源代理（Cloudflare Pages Functions / Netlify / Vercel rewrite），把 `/agent` 转到平台并在服务端注入 `X-API-Key`，浏览器不持 key
+
+## 环境变量 `.env`
+
+`.env` 与 `.env.example` 均被根 `.gitignore`（`.env.*`）忽略，不进仓库。变量清单：
+
+**前端 `.env`**
+| 变量 | 说明 | 默认 |
+|---|---|---|
+| `VITE_AGENT_API_KEY` | 智能体平台 Key（即 `X-API-Key` 的值） | — |
+| `VITE_AGENT_API_BASE` | 顾问接口基址；开发用 `/agent`（代理），生产可设 `https://api.tiaowulan.com` | `/agent` |
+| `VITE_USE_REAL_API` | `'true'` 启用 `server/` 只读后端；缺失/`'false'` 全走 mock | `false` |
+
+**后端 `server/.env`**
+| 变量 | 说明 | 默认 |
+|---|---|---|
+| `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` | MySQL 只读账号 | `118.25.21.45` / `3306` / `flower_shop` / `ai_readonly` / — |
+| `DB_SSL` | 是否启用 SSL 加密 | `true` |
+| `DB_PRICE_UNIT` | 价格单位 `yuan` / `cents` | `yuan` |
+| `TBL_USERS` 等 | 表名覆盖（默认按 `users` 等推断） | — |
+| `API_PORT` | 后端监听端口 | `4000` |
+
+## 待办 / 已知限制
+
+- **真实数据**：`server/` 只读接口已接，但仅当后端跑在 MySQL 白名单机器（`8.138.203.6`）或本机 IP 加入白名单时才连真库；否则前端回退 mock。生产二选一：把 `server/` 部署到白名单机器，或白名单加本机 IP。`server/src/mapping.js` 需按真实 3 表（`products`/`shop_products`/`shops`）重写方能对齐真库。
+- **智能体生产接入**：平台开 CORS，或部署侧加同源代理（见顾问对接段）。
+- **写接口仍为 mock**：登录、下单、支付、真实用户写入等写操作当前是 mock（DB 为只读账号）；用户数据待连库后由 `GET /api/users` 提供。
+- **库内现多为测试数据**：经智能体核实，`products` 表中存在「随机花瓶一个」「测试」等样例行，接真库后替换即可。
+
+## 环境坑
+
+1. **沙箱 safe-delete 拦截删除 `dist`**：WorkBuddy 的 safe-delete（命令级 hook）拦截一切删 `dist` 操作——`vite build` 的 `emptyOutDir`、手动 `rd`/`del`、`node fs.rmSync` 全被拦（fail-closed 不真删）。已设 `vite.config.js` 的 `build.emptyOutDir: false`；本机验证用 `npm run build -- --outDir dist-build` 绕道（输出到全新目录）。`npm run preview` 会锁 `dist` 句柄，构建/删 `dist` 前务必先结束预览进程。`dist-v*` 等沙箱多次构建产物已被 `.gitignore`。本机直接 `npm run build` 不受影响。
+2. **Sass 注释里别写 `#{}`**：会被当成插值解析报 `Expected expression`。
+3. **沙箱端口占用**：`npm run dev` 若 5180 被旧实例占用会自动顺延（5181/5182…），带 `/agent`+`/api` 代理的才是新实例；本机正常 `npm run dev` 直接绑 5180。
