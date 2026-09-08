@@ -1,0 +1,15 @@
+@use "sass:math";
+
+// 小程序 rpx → H5 rem
+//
+// 约定：1rem = 视口容器宽度（上限 480px），等价于小程序的 750rpx。
+// 因此 n rpx = n / 750 rem，在任何屏宽下都与小程序等比缩放，行为一致。
+// 例：rpx(28) → 0.0373rem → 375px 屏上等于 14px
+@function rpx($n) {
+  @return math.div($n, 750) * 1rem;
+}
+
+// 颜色加透明度（用于 category 的 {{item.color}}18 这类写法）
+@function alpha($color, $a) {
+  @return rgba($color, $a);
+}

@@ -1,0 +1,75 @@
+/* ============================================
+   跳舞兰AI花店 - 设计 token（从小程序 app.wxss 1:1 移植）
+   ============================================
+
+   尺寸换算：小程序 rpx 基于 750 设计稿，H5 里 1rem = 容器宽度（= 750rpx）
+   所以 n rpx = n / 750 rem。这里用 --rpx 作为换算基准，
+   配合 calc() 使用（Sass 不会计算 CSS 自定义属性里的函数，故不用 rpx()）。
+
+   颜色 / 阴影 / 渐变均为小程序原值。
+   ============================================ */
+
+:root {
+  /* 基准：1rpx 对应的长度 */
+  --rpx: calc(1rem / 750);
+
+  /* 主题色 */
+  --primary: #E8615D;
+  --primary-dark: #D14B47;
+  --primary-light: #FFF0F0;
+  --primary-gradient: linear-gradient(135deg, #E8615D 0%, #FF8A80 100%);
+
+  /* 辅色 */
+  --secondary: #4ECDC4;
+  --secondary-light: #E8FAF8;
+  --secondary-gradient: linear-gradient(135deg, #4ECDC4 0%, #44E6D3 100%);
+
+  /* 强调色 */
+  --accent: #FFE66D;
+  --accent-light: #FFF9E6;
+
+  /* 背景 */
+  --bg: #F8F5F0;
+  --bg-warm: #FFF9F5;
+  --bg-white: #FFFFFF;
+  --bg-card: #FFFFFF;
+
+  /* 文字 */
+  --text-primary: #2D3436;
+  --text-secondary: #636E72;
+  --text-light: #B2BEC3;
+  --text-white: #FFFFFF;
+
+  /* 边框 */
+  --border: #E8E4DF;
+  --border-light: #F0EDE8;
+
+  /* 阴影 */
+  --shadow-sm: 0 calc(2 * var(--rpx)) calc(8 * var(--rpx)) rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 calc(4 * var(--rpx)) calc(16 * var(--rpx)) rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 calc(8 * var(--rpx)) calc(32 * var(--rpx)) rgba(0, 0, 0, 0.08);
+  --shadow-primary: 0 calc(6 * var(--rpx)) calc(20 * var(--rpx)) rgba(232, 97, 93, 0.25);
+
+  /* 圆角 */
+  --radius-sm: calc(8 * var(--rpx));
+  --radius-md: calc(16 * var(--rpx));
+  --radius-lg: calc(24 * var(--rpx));
+  --radius-xl: calc(32 * var(--rpx));
+  --radius-pill: calc(999 * var(--rpx));
+
+  /* 间距 */
+  --spacing-xs: calc(8 * var(--rpx));
+  --spacing-sm: calc(16 * var(--rpx));
+  --spacing-md: calc(24 * var(--rpx));
+  --spacing-lg: calc(32 * var(--rpx));
+  --spacing-xl: calc(48 * var(--rpx));
+
+  /* 字号：小程序里 --font-* 变量实际未被使用，此处固化真实硬编码值 */
+  --fs-label: calc(20 * var(--rpx));
+  --fs-caption: calc(22 * var(--rpx));
+  --fs-minor: calc(24 * var(--rpx));
+  --fs-body: calc(26 * var(--rpx));
+  --fs-title: calc(28 * var(--rpx));
+  --fs-lg: calc(34 * var(--rpx));
+  --fs-hero: calc(40 * var(--rpx));
+}

@@ -1,0 +1,19 @@
+# 依赖
+node_modules/
+
+# 构建产物
+dist/
+dist-ssr/
+
+# WorkBuddy 内部数据（迁移笔记等，非项目源码）
+.workbuddy/
+
+# 系统/编辑器
+.DS_Store
+Thumbs.db
+*.local
+*.log
+
+# 环境变量
+.env
+.env.*
