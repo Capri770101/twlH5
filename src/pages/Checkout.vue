@@ -19,7 +19,7 @@
     </div>
 
     <!-- 收货地址（送货上门） -->
-    <div v-if="pickupMethod === 'delivery'" class="section-card" @click="toast('地址选择页开发中')">
+    <div v-if="pickupMethod === 'delivery'" class="section-card" @click="showAddr = true">
       <div class="address-section">
         <div class="address-header">
           <div class="address-info">
@@ -293,6 +293,8 @@
 
     <div v-if="toastText" class="twd-toast">{{ toastText }}</div>
   </div>
+  <AddressManager v-model="showAddr" />
+
 </template>
 
 <script setup>
@@ -306,13 +308,16 @@ import {
   clearCart,
   money
 } from '@/store'
+import store from '@/store'
 import NavBar from '@/components/NavBar.vue'
 import FlowerImage from '@/components/FlowerImage.vue'
+import AddressManager from '@/components/AddressManager.vue'
 
 const router = useRouter()
 
 const pickupMethod = ref('delivery')
-const address = ref({ name: '木木', phone: '138****8888', detail: '深圳市盐田区海山路18号' })
+const address = computed(() => store.selectedAddress || { name: '', phone: '', detail: '请选择收货地址' })
+const showAddr = ref(false)
 const pickupShop = ref({ name: '盐田花语鲜花店', address: '深圳市盐田区海山路18号' })
 const pickupContactName = ref('')
 const pickupContactPhone = ref('')
@@ -344,7 +349,7 @@ const payAmount = computed(() => goodsTotalPrice.value - discountAmount.value)
 
 const canSubmit = computed(() => {
   if (!groupedCart.value.length || submitting.value) return false
-  if (pickupMethod.value === 'delivery') return !!deliveryTime.value
+  if (pickupMethod.value === 'delivery') return !!deliveryTime.value && !!store.selectedAddress
   return !!pickupContactName.value && !!pickupContactPhone.value && !!pickupTime.value
 })
 
@@ -403,7 +408,7 @@ async function onSubmit() {
   const res = await createOrder({
     items,
     totalPrice: payAmount.value,
-    address,
+    address: store.selectedAddress,
     expectDeliveryTime: pickupMethod.value === 'delivery' ? deliveryTime.value : pickupTime.value,
     pickupMethod: pickupMethod.value,
     cardContent: cardFinalContent.value,

@@ -1,10 +1,30 @@
 import mockData from './data'
 
+// ===== 真实后端数据层（MySQL 经由 Node 后端 /api 代理）=====
+// 默认开启：优先调 /api，失败（后端未起 / DB 不可达 / 无权限）自动回退下方 mock，保证页面永远有数据
+const REAL_API_ENABLED = import.meta.env.VITE_USE_REAL_API !== 'false'
+const API_BASE = import.meta.env.VITE_API_BASE || '/api'
+async function realApi(path, params) {
+  const base = (typeof location !== 'undefined' && location.origin) || ''
+  const url = new URL(API_BASE + path, base)
+  if (params) for (const [k, v] of Object.entries(params)) {
+    if (v !== '' && v != null) url.searchParams.set(k, String(v))
+  }
+  const res = await fetch(url, { headers: { Accept: 'application/json' } })
+  if (!res.ok) throw new Error('api ' + res.status)
+  const j = await res.json()
+  if (j && j.error) throw new Error(j.error)
+  return j
+}
+
 // 模拟网络延迟
 const delay = (ms = 250) => new Promise(resolve => setTimeout(resolve, ms))
 
 // ===== 首页 =====
 export async function getHomeIndex() {
+  if (REAL_API_ENABLED) {
+    try { return await realApi('/home') } catch (e) { console.warn('[api] /home 真实接口失败，回退 mock：', e && e.message) }
+  }
   const data = { ...mockData.homeData }
   data.recommendFlowers = mockData.enrichFlowerList(mockData.flowers.slice(0, 6))
   data.nearbyShops = mockData.shops.slice(0, 4).map(shop => ({
@@ -17,6 +37,9 @@ export async function getHomeIndex() {
 
 // ===== 花束详情 =====
 export async function getFlowerDetail(id) {
+  if (REAL_API_ENABLED) {
+    try { return await realApi('/flowers/' + encodeURIComponent(id)) } catch (e) { console.warn('[api] /flowers/:id 真实接口失败，回退 mock：', e && e.message) }
+  }
   const flower = mockData.flowers.find(f => f.id === id)
   await delay()
   if (!flower) return null
@@ -46,12 +69,18 @@ export async function getFlowerDetail(id) {
 
 // ===== 分类 =====
 export async function getCategories() {
+  if (REAL_API_ENABLED) {
+    try { return await realApi('/categories') } catch (e) { console.warn('[api] /categories 真实接口失败，回退 mock：', e && e.message) }
+  }
   await delay(80)
   return mockData.categories
 }
 
 // ===== 花束列表（分类/排序/分页复用） =====
 export async function getFlowerList({ categoryId = '', sort = 'default', page = 1, pageSize = 10 } = {}) {
+  if (REAL_API_ENABLED) {
+    try { return await realApi('/flowers', { categoryId, sort, page, pageSize }) } catch (e) { console.warn('[api] /flowers 真实接口失败，回退 mock：', e && e.message) }
+  }
   let list = [...mockData.flowers]
   if (categoryId) list = list.filter(f => f.categoryId === categoryId)
   if (sort === 'sales') list.sort((a, b) => b.sales - a.sales)
@@ -183,6 +212,9 @@ function prepareShopTrustInfo(shop) {
 }
 
 export async function getShopDetail(id) {
+  if (REAL_API_ENABLED) {
+    try { return await realApi('/shops/' + encodeURIComponent(id)) } catch (e) { console.warn('[api] /shops/:id 真实接口失败，回退 mock：', e && e.message) }
+  }
   const shopRaw = mockData.shops.find(s => s.id === id)
   await delay()
   if (!shopRaw) return null
@@ -212,11 +244,26 @@ const SAMPLE_REVIEWS = [
 ]
 
 export async function getShopReviews(shopId) {
+  if (REAL_API_ENABLED) {
+    try { return await realApi('/shops/' + encodeURIComponent(shopId) + '/reviews') } catch (e) { console.warn('[api] /shops/:id/reviews 真实接口失败，回退 mock：', e && e.message) }
+  }
   await delay(120)
   return SAMPLE_REVIEWS
 }
 
+// 全部店铺列表（首页「更多花店」入口）
+export async function getShopList() {
+  if (REAL_API_ENABLED) {
+    try { return await realApi('/shops') } catch (e) { console.warn('[api] /shops 真实接口失败，回退 mock：', e && e.message) }
+  }
+  await delay(140)
+  return mockData.shops
+}
+
 export async function searchAll(keyword) {
+  if (REAL_API_ENABLED) {
+    try { return await realApi('/search', { q: keyword }) } catch (e) { console.warn('[api] /search 真实接口失败，回退 mock：', e && e.message) }
+  }
   const kw = (keyword || '').trim().toLowerCase()
   if (!kw) return { flowers: [], shops: [] }
   const flowers = mockData.flowers.filter(f =>
@@ -231,3 +278,492 @@ export async function searchAll(keyword) {
   await delay()
   return { flowers: mockData.enrichFlowerList(flowers), shops }
 }
+
+// ===== 登录（形态对齐小程序 /auth/*，当前为 mock，预留真实接口） =====
+
+// 微信公众平台 AppId：真接入网页授权时填上；留空则走 mock 登录
+export const WX_APPID = ''
+// 是否微信内置浏览器（用于切换登录方式 / 触发网页授权）
+export function isWechatEnv() {
+  return typeof navigator !== 'undefined' && /micromessenger/i.test(navigator.userAgent)
+}
+
+// 组装微信网页授权跳转地址（snsapi_userinfo 拿昵称头像）
+export function buildWechatAuthUrl(redirect) {
+  const appId = WX_APPID
+  if (!appId) return ''
+  const r = encodeURIComponent(redirect || location.href)
+  return `https://open.weixin.qq.com/connect/oauth2/authorize?appid=${appId}` +
+    `&redirect_uri=${r}&response_type=code&scope=snsapi_userinfo&state=twd#wechat_redirect`
+}
+
+// 微信登录：真实环境 code 来自授权回跳，此处 mock 返回 userInfo + token
+export async function loginByWechat(profile) {
+  await delay(300)
+  const userInfo = {
+    id: 'u_' + Math.random().toString(36).slice(2, 8),
+    nickname: (profile && profile.nickname) || '微信用户',
+    avatar: (profile && profile.avatar) || '',
+    phone: ''
+  }
+  const token = 'mock_wx_' + Math.random().toString(36).slice(2, 12)
+  return { userInfo, token }
+}
+
+// 发送短信验证码：真实环境后端发短信，此处 mock 返回成功
+export async function sendSmsCode(phone) {
+  await delay(300)
+  return { code: 0, data: true }
+}
+
+// 手机号 + 验证码登录：mock 下任意 6 位数字验证码通过，真实环境后端校验
+export async function loginByPhone(phone, code) {
+  await delay(300)
+  if (!/^\d{6}$/.test(code || '')) {
+    throw new Error('验证码错误')
+  }
+  const userInfo = {
+    id: 'u_' + Math.random().toString(36).slice(2, 8),
+    nickname: '花友' + phone.slice(-4),
+    avatar: '',
+    phone
+  }
+  const token = 'mock_phone_' + Math.random().toString(36).slice(2, 12)
+  return { userInfo, token }
+}
+
+// ===== AI 花艺顾问（对接跳舞兰自研智能体平台）=====
+// 平台：https://api.tiaowulan.com （OpenAPI: /openapi.json，标题「跳舞兰花卉智能体 API」）
+// 鉴权：X-API-Key（平台 Key）换 Bearer token
+//   1) POST /auth/token  body {external_user_id}  header X-API-Key  -> {access_token, user_id}
+//   2) POST /chat        body {message, user_id, session_id?, shop_id?}  header Authorization: Bearer <token>
+//      响应为结构化 UI：{ reply, ui, action:{type,payload}, tool_calls:[...], data:{poll} }
+//      ui 类型：text / dialog_options / plan_card / shop_card / order_card / pay_jump
+// 开发态：apiBase 默认 '/agent'（Vite dev 代理转发，同源免 CORS）；生产可设 VITE_AGENT_API_BASE=https://api.tiaowulan.com
+// 任何异常（无 key / 网络 / CORS / 超时）→ 自动回退前端 mock 演示
+export const AGENT_CONFIG = {
+  apiBase: import.meta.env.VITE_AGENT_API_BASE || '/agent',
+  enabled: true, // 有 key 即尝试走真实智能体，失败自动回退 mock
+  get apiToken() {
+    return import.meta.env.VITE_AGENT_API_KEY || ''
+  }
+}
+
+// 场景预设（与小程序 ai-chat 一致）
+const SCENE_PRESETS = {
+  birthday: {
+    label: '生日祝福',
+    prompt: '送朋友生日，预算200元左右，希望温暖明亮一点',
+    scene: '生日',
+    emotion: '祝福、开心、被重视',
+    style: '明亮温暖',
+    palette: ['#f8c96b', '#f49a73', '#fff1c7'],
+    materials: ['向日葵', '香槟玫瑰', '洋桔梗', '尤加利'],
+    card: '生日快乐，愿你一路有光，所遇皆暖，所有期待都如愿。'
+  },
+  apology: {
+    label: '道歉和好',
+    prompt: '我想向女朋友道歉，希望真诚一点，不要太夸张',
+    scene: '道歉',
+    emotion: '歉意、珍惜、希望和好',
+    style: '柔和克制',
+    palette: ['#f6c7cf', '#ffffff', '#b9d8c4'],
+    materials: ['粉玫瑰', '白桔梗', '白玫瑰', '尤加利'],
+    card: '对不起，这次是我不好。愿这束花先替我表达真心和在乎。'
+  },
+  confess: {
+    label: '表白心意',
+    prompt: '想表白，关系还没确定，希望浪漫但不要有压力',
+    scene: '表白',
+    emotion: '心动、克制、温柔表达',
+    style: '轻浪漫',
+    palette: ['#f4a6b7', '#ffe7ec', '#d8c3f4'],
+    materials: ['粉玫瑰', '紫罗兰', '洋甘菊', '满天星'],
+    card: '喜欢你这件事，我想让鲜花先替我说出口。'
+  },
+  thanks: {
+    label: '感谢帮助',
+    prompt: '想感谢一个一直帮助我的人，希望大方真诚',
+    scene: '感谢',
+    emotion: '感谢、珍惜、温暖',
+    style: '自然大方',
+    palette: ['#f1d7a7', '#f8f4e8', '#9dbb98'],
+    materials: ['香槟玫瑰', '洋桔梗', '小菊', '尤加利'],
+    card: '谢谢你的照顾与支持，愿这束花把我的真心送到你身边。'
+  }
+}
+
+// 从智能体响应里兼容多种字段名提取商品数组
+export function extractAgentProducts(payload) {
+  const sources = [
+    payload && payload.products,
+    payload && payload.recommendations,
+    payload && payload.items,
+    payload && payload.data && payload.data.products,
+    payload && payload.result && payload.result.products,
+    payload && payload.result && payload.result.recommendations
+  ]
+  return sources.find(list => Array.isArray(list)) || []
+}
+
+// 归一化商品（价格兼容 元/分 多种字段）
+export function normalizeAgentProducts(products, shopId = 'default') {
+  return products
+    .map(item => {
+      const p = item && typeof item === 'object' ? item : {}
+      const id = String(p.id || p.product_id || p.productId || p.plan_id || p.planId || '').trim()
+      const name = String(p.name || p.title || p.product_name || '推荐花束').trim()
+      const rawPrice =
+        p.price_yuan !== undefined ? p.price_yuan
+          : p.price_cent !== undefined ? Number(p.price_cent) / 100
+            : p.price_fen !== undefined ? Number(p.price_fen) / 100
+              : p.price
+      const price = Number(rawPrice)
+      const image = p.image || p.image_url || p.imageUrl || (Array.isArray(p.images) ? p.images[0] : '') || ''
+      return {
+        ...p,
+        id,
+        name,
+        price: Number.isFinite(price) ? price : 0,
+        priceText: Number.isFinite(price) ? price.toFixed(2) : '到店咨询',
+        image,
+        shopId: p.shop_id || p.shopId || shopId
+      }
+    })
+    .filter(p => p.id && p.name)
+}
+
+function matchPreset(text) {
+  if (/道歉|和好|原谅|生气|吵架|对不起|抱歉/.test(text)) return SCENE_PRESETS.apology
+  if (/表白|喜欢|暗恋|心动|告白|追你/.test(text)) return SCENE_PRESETS.confess
+  if (/感谢|谢谢|帮助|照顾|辛苦/.test(text)) return SCENE_PRESETS.thanks
+  if (/生日|寿星|周岁|冥诞/.test(text)) return SCENE_PRESETS.birthday
+  return null
+}
+
+function matchBudget(text) {
+  const m = String(text).match(/(\d{2,4})\s*元?/)
+  return m ? Number(m[1]) : 0
+}
+
+// 未命中任何场景时的中性兜底方案（不再默认生日，避免误导）
+const GENERIC_PLAN = {
+  title: '专属花艺方案',
+  scene: '定制',
+  emotion: '用心挑选，把心意送到 TA 手里',
+  style: '随你心意',
+  budgetText: '约 ¥199-299',
+  materials: ['玫瑰', '洋桔梗', '尤加利', '满天星'],
+  palette: ['#f8c96b', '#f49a73', '#fff1c7'],
+  card: '一束为你而选的花，把想说的话轻轻递到 TA 手里。',
+  sourceText: ''
+}
+
+function buildPlanFromText(text) {
+  const source = matchPreset(text) || GENERIC_PLAN
+  const budget = matchBudget(text)
+  return {
+    title: source.title,
+    scene: source.scene,
+    emotion: source.emotion,
+    style: source.style,
+    budgetText: budget ? `约 ¥${budget}` : source.budgetText,
+    materials: source.materials,
+
+    palette: source.palette,
+    card: source.card,
+    sourceText: text
+  }
+}
+
+// 前端 mock：从 mock 花束里按场景挑 3 个推荐
+function buildMockProducts(plan, shopId) {
+  const pool = mockData.flowers
+  let picked = pool
+    .filter(f => (f.tags || []).some(t => plan.emotion.includes(t) || plan.scene.includes(t)))
+    .slice(0, 3)
+  if (picked.length < 3) picked = pool.slice(0, 3)
+  return picked.map(f => ({
+    id: f.id,
+    name: f.name,
+    price: Math.round((f.price || 0) / 100),
+    priceText: ((f.price || 0) / 100).toFixed(2),
+    image: f.image || '',
+    shopId
+  }))
+}
+
+function buildMockAdvisorReply(text, shopId) {
+  const plan = buildPlanFromText(text)
+  const products = buildMockProducts(plan, shopId)
+  const reply =
+    `已为你生成「${plan.title}」💐\n` +
+    `想表达的：${plan.emotion}\n` +
+    `风格方向：${plan.style}\n` +
+    `预算参考：${plan.budgetText}\n` +
+    `推荐花材：${plan.materials.join('、')}\n` +
+    `贺卡建议：${plan.card}\n` +
+    `下面是为你挑选的参考花束，喜欢可以直接加入购物车～`
+  return { reply, products, sessionId: '', mock: true }
+}
+
+// 外部用户标识：生成本机匿名 ID（持久化），登录后可在上层覆盖
+function getExternalUid() {
+  try {
+    let anon = localStorage.getItem('twd_external_uid')
+    if (!anon) {
+      anon = 'h5_anon_' + Math.random().toString(36).slice(2, 10)
+      localStorage.setItem('twd_external_uid', anon)
+    }
+    return anon
+  } catch (e) {
+    return 'h5_anon_' + Math.random().toString(36).slice(2, 10)
+  }
+}
+
+// 解析 JWT 过期时间（毫秒）
+function jwtExp(token) {
+  try {
+    const p = String(token).split('.')[1]
+    const json = decodeURIComponent(escape(atob(p.replace(/-/g, '+').replace(/_/g, '/'))))
+    const d = JSON.parse(json)
+    return (d.exp || 0) * 1000
+  } catch (e) {
+    return 0
+  }
+}
+
+let agentToken = ''
+let agentTokenExp = 0
+let agentUserId = ''
+
+// 1) 用平台 Key 换 Bearer token（带内存+过期缓存）
+async function ensureAgentToken() {
+  if (agentToken && Date.now() < agentTokenExp - 60000) return agentToken
+  const res = await fetch(AGENT_CONFIG.apiBase + '/auth/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-API-Key': AGENT_CONFIG.apiToken },
+    body: JSON.stringify({ external_user_id: getExternalUid() })
+  })
+  if (!res.ok) throw new Error('agent token ' + res.status)
+  const d = await res.json()
+  agentToken = d.access_token
+  agentUserId = d.user_id || agentUserId
+  agentTokenExp = jwtExp(agentToken) || Date.now() + 29 * 24 * 3600 * 1000
+  return agentToken
+}
+
+// 从方案对象里解析价格（兼容 元/分 多字段）
+function parseAgentPrice(obj) {
+  if (!obj || typeof obj !== 'object') return 0
+  const cands = [obj.total_estimate, obj.price, obj.budget_num, obj.estimated_price, obj.price_yuan]
+  for (const c of cands) {
+    if (typeof c === 'number' && c > 0) return c
+    if (typeof c === 'string') {
+      const m = c.match(/(\d+(?:\.\d+)?)/)
+      if (m) return Number(m[1])
+    }
+  }
+  return 0
+}
+
+// 把原始结构化响应归一化为前端可渲染的消息
+function normalizeAdvisorResponse(r, sessionId) {
+  if (!r || typeof r !== 'object') {
+    return { reply: '', ui: 'text', options: [], plans: [], shops: [], poll: null, sessionId }
+  }
+  const ui = r.ui || (r.action && r.action.type) || 'text'
+  const payload = (r.action && r.action.payload) || r
+  const options = payload.options || r.options || []
+  let plans = payload.plans || r.plans || []
+  const shops = payload.shops || r.shops || []
+  const poll = r.data && r.data.poll
+    ? (String(r.data.poll).startsWith('http') ? r.data.poll : AGENT_CONFIG.apiBase + r.data.poll)
+    : null
+
+  // 没 plan_card 时，从 tool_calls 的 DIY 方案结果里提取
+  if (!plans.length && Array.isArray(r.tool_calls)) {
+    for (const tc of r.tool_calls) {
+      if (!tc || !tc.name) continue
+      if (!/plan|diy|flower/.test(tc.name.toLowerCase())) continue
+      const obj = typeof tc.result === 'string'
+        ? (() => { try { return JSON.parse(tc.result) } catch (e) { return null } })()
+        : tc.result
+      if (!obj) continue
+      plans.push({
+        plan_id: obj.plan_id || tc.name,
+        name: obj.name || '为你定制的花艺方案',
+        price: parseAgentPrice(obj),
+        desc: obj.desc || obj.meaning || (obj.design && obj.design.packaging) || '',
+        image: obj.effect_image_url || obj.image_url || obj.image || '',
+        merchant: obj.merchant_name || '',
+        raw: obj
+      })
+    }
+  }
+
+  return {
+    reply: r.reply || payload.reply || '',
+    ui,
+    options: Array.isArray(options) ? options.map(o => ({ label: o.label, value: o.value })) : [],
+    plans: plans.map(p => ({
+      id: String(p.plan_id || p.name),
+      name: p.name,
+      price: p.price,
+      priceText: p.price ? p.price.toFixed(2) : '到店咨询',
+      desc: p.desc || '',
+      image: p.image || '',
+      shopId: p.shopId || 'default'
+    })),
+    shops: Array.isArray(shops) ? shops : [],
+    poll: poll || null,
+    mock: false,
+    sessionId: r.session_id || sessionId || ''
+  }
+}
+
+// 主入口：优先真实智能体，失败回退 mock
+export async function chatWithAdvisor({ message, shopId = 'default', sessionId = '' }) {
+  if (AGENT_CONFIG.enabled && AGENT_CONFIG.apiToken) {
+    try {
+      const tok = await ensureAgentToken()
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), 60000)
+      const res = await fetch(AGENT_CONFIG.apiBase + '/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${tok}`,
+          'X-API-Key': AGENT_CONFIG.apiToken
+        },
+        body: JSON.stringify({
+          message,
+          user_id: agentUserId || getExternalUid(),
+          session_id: sessionId,
+          shop_id: shopId
+        }),
+        signal: ctrl.signal
+      })
+      clearTimeout(timer)
+      if (!res.ok) throw new Error('chat ' + res.status)
+      const r = await res.json()
+      const norm = normalizeAdvisorResponse(r, sessionId)
+      norm.sessionId = norm.sessionId || sessionId
+      return norm
+    } catch (e) {
+      // 跨域 / 网络 / 超时 / 401：回退 mock
+      console.warn('[advisor] 真实智能体不可用，回退 mock：', e && e.message)
+    }
+  }
+  // mock 演示
+  await delay(600 + Math.random() * 500)
+  return buildMockAdvisorReply(message, shopId)
+}
+
+// 解析一段 SSE（形如 "event: text\ndata: {...}"）
+function parseSseChunk(chunk) {
+  const lines = String(chunk).split(/\r?\n/)
+  let event = 'message'
+  const dataLines = []
+  for (const line of lines) {
+    if (!line || line.startsWith(':')) continue
+    if (line.startsWith('event:')) event = line.slice(6).trim()
+    else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim())
+  }
+  if (!dataLines.length) return null
+  const raw = dataLines.join('\n')
+  let data = raw
+  try { data = JSON.parse(raw) } catch (e) { /* 非 JSON 时保留原文 */ }
+  return { event, data }
+}
+
+// 流式对话（SSE POST /chat/stream）
+// 事件类型（实测）：
+//   tool_call → { name, status }               智能体正在调用工具（查库等）
+//   text      → { content }                    文本增量，可多次
+//   card      → { ui, data }                   结构化卡片（plan_card/order_card/shop_card/pay_jump/image_task/greeting_card/dialog_options）
+//   done      → { session_id }                 结束，携带会话 id
+// onEvent(ev) 逐事件回调；返回 { ok, gotAny, sessionId }
+export async function streamAdvisorChat({ message, shopId = 'default', sessionId = '', onEvent, signal }) {
+  if (!(AGENT_CONFIG.enabled && AGENT_CONFIG.apiToken)) return { ok: false, gotAny: false, sessionId }
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), 120000)
+  const onAbort = () => ctrl.abort()
+  if (signal) signal.addEventListener('abort', onAbort)
+  let gotAny = false
+  let finalSessionId = sessionId
+  try {
+    const tok = await ensureAgentToken()
+    const res = await fetch(AGENT_CONFIG.apiBase + '/chat/stream', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+        Authorization: `Bearer ${tok}`,
+        'X-API-Key': AGENT_CONFIG.apiToken
+      },
+      body: JSON.stringify({
+        message,
+        user_id: agentUserId || getExternalUid(),
+        session_id: sessionId || null,
+        shop_id: shopId
+      }),
+      signal: ctrl.signal
+    })
+    if (!res.ok || !res.body) throw new Error('stream ' + res.status)
+    const reader = res.body.getReader()
+    const dec = new TextDecoder('utf-8')
+    let buf = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += dec.decode(value, { stream: true })
+      let idx
+      while ((idx = buf.indexOf('\n\n')) >= 0) {
+        const chunk = buf.slice(0, idx)
+        buf = buf.slice(idx + 2)
+        const ev = parseSseChunk(chunk)
+        if (!ev) continue
+        gotAny = true
+        if (ev.event === 'done' && ev.data && ev.data.session_id) finalSessionId = ev.data.session_id
+        if (typeof onEvent === 'function') onEvent(ev)
+      }
+    }
+    return { ok: true, gotAny, sessionId: finalSessionId }
+  } catch (e) {
+    console.warn('[advisor] 流式对话失败，回退普通对话：', e && e.message)
+    return { ok: false, gotAny, sessionId: finalSessionId }
+  } finally {
+    clearTimeout(timer)
+    if (signal) signal.removeEventListener('abort', onAbort)
+  }
+}
+
+// 轮询效果图任务（/tasks/{id}），返回图片 URL 或 null
+export async function pollAgentTask(pollUrl, onImage) {
+  if (!pollUrl) return
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), 30000)
+  try {
+    for (let i = 0; i < 12; i++) {
+      const res = await fetch(pollUrl, {
+        headers: AGENT_CONFIG.apiToken ? { 'X-API-Key': AGENT_CONFIG.apiToken } : {},
+        signal: ctrl.signal
+      })
+      if (!res.ok) break
+      const d = await res.json()
+      const img =
+        (d && (d.image_url || d.effect_image_url || d.url || (d.result && d.result.image_url))) || null
+      const done = d && (d.status === 'done' || d.status === 'completed' || d.stage === 'done')
+      if (img) { onImage && onImage(img); if (done) break }
+      if (done) break
+      await new Promise(r => setTimeout(r, 2500))
+    }
+  } catch (e) {
+    /* 轮询失败静默 */
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+export const ADVISOR_PRESETS = Object.keys(SCENE_PRESETS).map(key => ({ key, ...SCENE_PRESETS[key] }))

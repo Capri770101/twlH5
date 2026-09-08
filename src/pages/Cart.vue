@@ -6,7 +6,7 @@
     <template v-if="state.cart.length">
       <div class="cart-list">
         <div v-for="group in groupedCart" :key="group.shopId" class="shop-group">
-          <div class="shop-header">
+          <div class="shop-header" @click="toShop(group.shopId)">
             <span class="shop-name">{{ group.shopName }}</span>
             <span class="shop-arrow">›</span>
           </div>
@@ -92,6 +92,10 @@ import NavBar from '@/components/NavBar.vue'
 import FlowerImage from '@/components/FlowerImage.vue'
 
 const router = useRouter()
+
+function toShop(id) {
+  if (id && id !== 'default') router.push({ name: 'shop-detail', params: { id } })
+}
 
 const toastText = ref('')
 let toastTimer = null

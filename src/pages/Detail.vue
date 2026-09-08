@@ -20,7 +20,7 @@
         <div class="detail-tags">
           <span v-for="tag in flower.displayTags" :key="tag" class="tag tag-primary">{{ tag }}</span>
         </div>
-        <button class="detail-share-btn" @click="toast('分享面板开发中')">↗</button>
+        <button class="detail-share-btn" @click="onShare">↗</button>
       </div>
 
       <!-- 基本信息 -->
@@ -122,7 +122,7 @@
             <img class="footer-icon footer-icon-nav" src="/images/tab-home.png" alt="店铺" />
             <span class="footer-action-text">店铺</span>
           </button>
-          <button class="footer-action footer-action-ai" @click="toast('AI 花艺顾问开发中')">
+          <button class="footer-action footer-action-ai" @click="router.push({ name: 'advisor' })">
             <span class="footer-ai-icon">AI</span>
             <span class="footer-action-text">花艺顾问</span>
           </button>
@@ -180,8 +180,23 @@ function onAddCart() {
 }
 
 function onBuyNow() {
+  if (!flower.value) return
   addToCart(flower.value, 1)
-  toast('结算页开发中')
+  router.push({ name: 'checkout' })
+}
+
+function onShare() {
+  const url = location.href
+  const title = flower.value ? flower.value.name : '跳舞兰AI花店'
+  if (navigator.share) {
+    navigator.share({ title, text: '为你推荐一束好花 🌸', url }).catch(() => {})
+    return
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(() => toast('链接已复制，去分享吧')).catch(() => toast('分享链接：' + url))
+  } else {
+    toast('分享链接：' + url)
+  }
 }
 
 onMounted(async () => {

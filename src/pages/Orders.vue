@@ -52,10 +52,10 @@
         </div>
         <div v-else-if="order.status === 'completed'" class="order-actions">
           <button v-if="!order._hasReview" class="btn btn-outline btn-sm" @click.stop="toast('评价页开发中')">去评价</button>
-          <button class="btn btn-primary btn-sm" @click.stop="toast('已加入购物车')">再来一单</button>
+          <button class="btn btn-primary btn-sm" @click.stop="repeatOrder(order)">再来一单</button>
         </div>
         <div v-else-if="!['refunding', 'refunded', 'refund_failed', 'cancelled'].includes(order.status)" class="order-actions">
-          <button class="btn btn-primary btn-sm" @click.stop="toast('已加入购物车')">再来一单</button>
+          <button class="btn btn-primary btn-sm" @click.stop="repeatOrder(order)">再来一单</button>
         </div>
         <div v-if="order.status === 'refunding'" class="order-actions">
           <span class="order-refunding-tip">等待商家处理退款…</span>
@@ -83,7 +83,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getOrderList } from '@/mock/api'
-import { money } from '@/store'
+import { money, addToCart } from '@/store'
 import NavBar from '@/components/NavBar.vue'
 import FlowerImage from '@/components/FlowerImage.vue'
 
@@ -119,6 +119,23 @@ function onTabChange(value) {
 
 function goDetail(id) {
   router.push({ name: 'order-detail', params: { id } })
+}
+
+function repeatOrder(order) {
+  if (!order || !order.items || !order.items.length) return
+  order.items.forEach(item => {
+    addToCart({
+      id: item.id,
+      name: item.name,
+      subtitle: item.subtitle || '',
+      image: item.image || '',
+      price: item.price || 0,
+      shopId: 'default',
+      quantity: item.quantity || 1
+    })
+  })
+  toast('已加入购物车')
+  setTimeout(() => router.push({ name: 'cart' }), 300)
 }
 
 const toastText = ref('')

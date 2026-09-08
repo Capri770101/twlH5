@@ -74,7 +74,7 @@
     <div v-if="searchKeyword && shops.length && !loading" class="shop-search-section">
       <div class="shop-search-title">🏪 相关花店</div>
       <div class="shop-search-list">
-        <div v-for="shop in shops" :key="shop.id" class="shop-card">
+        <div v-for="shop in shops" :key="shop.id" class="shop-card" @click="goShop(shop)">
           <div class="shop-cover">
             <span class="shop-cover-placeholder">🌸</span>
             <span v-if="shop.isNew" class="shop-tag-new">新店</span>
@@ -227,6 +227,10 @@ function onSortChange(sort) {
 
 function goDetail(item) {
   router.push({ name: 'detail', params: { id: item.id } })
+}
+
+function goShop(shop) {
+  router.push({ name: 'shop-detail', params: { id: shop.id } })
 }
 
 function onAddCart(item) {

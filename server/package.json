@@ -1,0 +1,17 @@
+{
+  "name": "tiaowulan-h5-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "跳舞兰AI花店 H5 的 Node 后端：持有 MySQL 只读库连接，供前端 /api 调用",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "mysql2": "^3.11.5"
+  }
+}

@@ -1,8 +1,14 @@
 # 依赖
 node_modules/
 
-# 构建产物
+# 构建产物（沙箱多次构建产物目录，统一忽略）
 dist/
+dist-build/
+dist-v2/
+dist-v3/
+dist-v4/
+dist-v5/
+dist-v6/
 dist-ssr/
 
 # WorkBuddy 内部数据（迁移笔记等，非项目源码）
@@ -20,3 +26,6 @@ Thumbs.db
 
 # 浏览器自动化残留（agent-browser skill 临时目录，非项目源码）
 .playwright-mcp/
+
+# 临时诊断脚本（依赖本地 .env 密钥，非项目运行所需，可本地保留但勿入库）
+verify-*.mjs

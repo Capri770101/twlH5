@@ -48,11 +48,21 @@
       </div>
     </div>
 
+    <!-- ===== AI 花艺顾问入口 ===== -->
+    <section class="ai-entry" @click="router.push({ name: 'advisor' })">
+      <div class="ai-entry-icon">🤖</div>
+      <div class="ai-entry-text">
+        <span class="ai-entry-title">AI 花艺顾问</span>
+        <span class="ai-entry-sub">说说故事，AI 帮你搭配一束刚刚好的花</span>
+      </div>
+      <span class="ai-entry-arrow">›</span>
+    </section>
+
     <!-- ===== 同城花店 ===== -->
     <section v-if="nearbyShops.length" class="section">
       <div class="section-header">
         <span class="section-title">同城花店</span>
-        <span class="section-more" @click="toast('花店列表页开发中')">更多花店 ›</span>
+        <span class="section-more" @click="router.push({ name: 'shops' })">更多花店 ›</span>
       </div>
       <div class="shop-scroll hide-scrollbar">
         <div class="shop-list">
@@ -137,14 +147,17 @@
 
     <div v-if="toastText" class="twd-toast">{{ toastText }}</div>
   </div>
+  <AddressManager v-model="showAddr" />
+
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { getHomeIndex } from '@/mock/api'
 import FlowerImage from '@/components/FlowerImage.vue'
-import store, { setAddress } from '@/store'
+import store from '@/store'
+import AddressManager from '@/components/AddressManager.vue'
 
 const router = useRouter()
 const rpx = n => `${n / 750}rem`
@@ -154,7 +167,8 @@ const categories = ref([])
 const nearbyShops = ref([])
 const recommendFlowers = ref([])
 const loading = ref(true)
-const userAddress = ref(store.address)
+const userAddress = computed(() => store.selectedAddress?.full || '请选择收货地址')
+const showAddr = ref(false)
 
 const bannerRef = ref(null)
 const activeBanner = ref(0)
@@ -186,8 +200,7 @@ function goCategory(catId) {
 }
 
 function onLocationTap() {
-  toast('地址选择弹窗开发中')
-  setAddress(store.address)
+  showAddr.value = true
 }
 
 function onBannerScroll(e) {
@@ -222,6 +235,9 @@ onUnmounted(() => {
 <style lang="scss" scoped>
 .page {
   padding-bottom: rpx(20);
+  overflow-x: hidden;
+  max-width: 1rem;
+  margin: 0 auto;
 }
 
 /* ===== 顶部导航栏 ===== */
@@ -371,7 +387,7 @@ onUnmounted(() => {
 }
 .category-list {
   display: flex;
-  padding: 0 rpx(16);
+  padding: 0 rpx(24);
   gap: rpx(8);
 }
 .category-item {
@@ -563,5 +579,54 @@ onUnmounted(() => {
   font-size: var(--fs-minor);
   z-index: 200;
   animation: fadeIn 0.2s ease-out;
+}
+
+/* AI 花艺顾问入口 */
+.ai-entry {
+  display: flex;
+  align-items: center;
+  gap: rpx(20);
+  margin: rpx(20) rpx(24) 0;
+  padding: rpx(26) rpx(28);
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, #ffffff 0%, #fff7f4 58%, #eef8f6 100%);
+  border: 1rpx solid rgba(232, 97, 93, 0.12);
+  box-shadow: 0 rpx(12) rpx(36) rgba(83, 62, 48, 0.06);
+  cursor: pointer;
+}
+.ai-entry-icon {
+  width: rpx(72);
+  height: rpx(72);
+  border-radius: rpx(20);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff0f0;
+  font-size: rpx(40);
+  flex-shrink: 0;
+}
+.ai-entry-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.ai-entry-title {
+  font-size: rpx(30);
+  font-weight: 800;
+  color: var(--text-primary);
+}
+.ai-entry-sub {
+  margin-top: rpx(6);
+  font-size: rpx(22);
+  color: var(--text-light);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ai-entry-arrow {
+  font-size: rpx(40);
+  color: var(--text-light);
+  flex-shrink: 0;
 }
 </style>

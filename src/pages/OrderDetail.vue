@@ -24,7 +24,7 @@
             <span>电话：{{ order.deliveryInfo.phone }}</span>
             <span>预计：{{ order.deliveryInfo.estimatedTime }}</span>
           </div>
-          <button class="btn btn-outline btn-sm" @click="toast('拨号功能开发中')">联系骑手</button>
+          <button class="btn btn-outline btn-sm" @click="callRider">联系骑手</button>
         </div>
       </div>
 
@@ -190,6 +190,12 @@ const statusDesc = computed(() => {
 function copyId() {
   if (navigator.clipboard) navigator.clipboard.writeText(order.value.id)
   toast('已复制订单号')
+}
+
+function callRider() {
+  const phone = order.value?.deliveryInfo?.phone
+  if (phone) location.href = 'tel:' + String(phone).replace(/[^0-9]/g, '')
+  else toast('暂未获取到骑手电话')
 }
 
 const toastText = ref('')
