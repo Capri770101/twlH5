@@ -17,3 +17,6 @@ Thumbs.db
 # 环境变量
 .env
 .env.*
+
+# 浏览器自动化残留（agent-browser skill 临时目录，非项目源码）
+.playwright-mcp/
