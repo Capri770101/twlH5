@@ -17,6 +17,11 @@ const routes = [
   { path: '/settings', name: 'settings', component: () => import('@/pages/Settings.vue'), meta: { requiresAuth: true } }
 ]
 
+// 开发态卡片自检页（仅本地 dev，不进生产包）
+if (import.meta.env.DEV) {
+  routes.push({ path: '/card-lab', name: 'card-lab', component: () => import('@/pages/CardLab.vue') })
+}
+
 const router = createRouter({
   routes,
   history: createWebHistory(),
