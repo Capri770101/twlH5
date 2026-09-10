@@ -48,7 +48,10 @@
 
       <!-- ===== PC 扫码视图（点「微信扫码登录」后展示，覆盖手机号表单） ===== -->
       <div v-if="!wechatEnv && pcView === 'qr'" class="qr-panel">
-        <div class="qr-title">微信扫码登录</div>
+        <div class="qr-head">
+          <span class="qr-title">微信扫码登录</span>
+          <span class="qr-switch" @click="backToPhone">切换手机号登录 ›</span>
+        </div>
         <template v-if="pcUseQrconnect">
           <button class="login-btn wechat" :class="{ disabled: !agreed }" @click="onQrconnectLogin">
             <span class="wb-icon">💬</span> 微信扫码登录
@@ -536,6 +539,22 @@ onUnmounted(() => {
   font-weight: 700;
   color: var(--text-primary);
 }
+.qr-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: rpx(16);
+}
+.qr-switch {
+  flex: none;
+  font-size: rpx(24);
+  color: var(--primary);
+  padding: rpx(8) rpx(16);
+  border: 1rpx solid rgba(217, 116, 95, 0.35);
+  border-radius: 999rpx;
+  background: #fdf3f0;
+}
 .qr-box {
   position: relative;
   margin-top: rpx(24);
@@ -598,11 +617,15 @@ onUnmounted(() => {
   font-size: rpx(24);
 }
 .qr-back {
-  margin-top: rpx(24);
-  border: none;
-  background: transparent;
-  color: var(--text-light);
-  font-size: rpx(24);
+  margin-top: rpx(26);
+  width: 100%;
+  height: rpx(84);
+  border: 1rpx solid var(--border);
+  border-radius: var(--radius-md);
+  background: #f6f3ee;
+  color: var(--text-primary);
+  font-size: rpx(28);
+  font-weight: 600;
 }
 .pc-wx-acts {
   margin-top: rpx(28);
