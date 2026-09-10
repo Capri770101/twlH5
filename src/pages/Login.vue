@@ -30,10 +30,38 @@
 
       <div class="divider"><span>或</span></div>
 
-      <button class="login-btn wechat" :class="{ disabled: !agreed }" @click="onWechatLogin">
-        <span class="wb-icon">💬</span> 微信一键登录
-      </button>
-      <p class="env-tip" v-if="wechatEnv">检测到微信环境，将使用微信授权登录</p>
+      <!-- 微信内：一键授权按钮（snsapi_userinfo 完整授权） -->
+      <template v-if="wechatEnv">
+        <button class="login-btn wechat" :class="{ disabled: !agreed }" @click="onWechatLogin">
+          <span class="wb-icon">💬</span> 微信一键登录
+        </button>
+        <p class="env-tip">检测到微信环境，将使用微信授权登录</p>
+      </template>
+
+      <!-- PC / 外部浏览器：二维码内嵌登录框（方案 B 扫码中转；方案 A 配好后跳 qrconnect） -->
+      <div v-else class="qr-panel">
+        <div class="qr-title">微信扫码登录</div>
+        <template v-if="pcUseQrconnect">
+          <button class="login-btn wechat" :class="{ disabled: !agreed }" @click="onQrconnectLogin">
+            <span class="wb-icon">💬</span> 微信扫码登录
+          </button>
+        </template>
+        <template v-else>
+          <div class="qr-box">
+            <img v-if="pcQrData" :src="pcQrData" class="qr-img" alt="微信登录二维码" />
+            <div v-else class="qr-loading">二维码生成中…</div>
+            <div v-if="pcQrExpired" class="qr-expired">
+              <div>二维码已失效</div>
+              <button class="qr-refresh" @click="genPcQr">刷新二维码</button>
+            </div>
+          </div>
+          <div class="qr-hint">
+            请使用手机微信「扫一扫」<br />完成授权后电脑将自动登录
+            <span v-if="isMobileEnv" class="qr-hint-sub">（或用另一台设备扫码 / 复制链接到微信打开）</span>
+          </div>
+          <button v-if="isMobileEnv" class="qr-copy" @click="onCopyLink">复制链接到微信打开</button>
+        </template>
+      </div>
     </div>
 
     <div class="agreement" @click="agreed = !agreed">
@@ -51,29 +79,6 @@
         <div class="am-title">{{ agreementTitle }}</div>
         <div class="am-body">{{ agreementText }}</div>
         <button class="am-btn" @click="showAgreement = false">我已知晓</button>
-      </div>
-    </div>
-
-    <!-- PC 端 / 外部浏览器点微信登录：方案 B 扫码中转（禁静默授权，绝不 mock 建账号） -->
-    <div v-if="showPcQr" class="modal-mask" @click="closePcQr">
-      <div class="modal-content pc-wx-modal" @click.stop>
-        <div class="am-title">微信扫码登录</div>
-        <div class="am-body pc-wx-tip-body">
-          打开手机微信「扫一扫」，扫描下方二维码，
-          <br />在手机上完成授权后，电脑将自动登录。
-        </div>
-        <div class="pc-qr-wrap">
-          <img v-if="pcQrData" :src="pcQrData" class="pc-qr-img" alt="微信登录二维码" />
-          <div v-if="pcQrExpired" class="pc-qr-expired">
-            <div>二维码已过期</div>
-            <button class="pc-qr-refresh" @click="openPcQr">刷新二维码</button>
-          </div>
-        </div>
-        <div class="pc-qr-hint">请使用手机微信扫一扫</div>
-        <div class="pc-wx-acts">
-          <button class="am-btn pc-wx-copy" @click="onCopyLink">链接在手机打开</button>
-          <button class="am-btn pc-wx-close" @click="closePcQr">取消</button>
-        </div>
       </div>
     </div>
   </div>
@@ -146,23 +151,11 @@ async function onPhoneLogin() {
 
 async function onWechatLogin() {
   if (!agreed.value) { toast('请先阅读并同意协议'); return }
-  // 微信内 + 已配置 appId → 跳公众号网页授权 snsapi_userinfo，回跳后由后端 code2session 换取 token
+  // 微信内 + 已配置 appId → 跳公众号网页授权 snsapi_userinfo，回跳后由后端 code 换 openid
+  // ⚠️ 硬策略：无 code / 网络失败一律抛错，绝不静默建账号（详见 api.js loginByWechat）
   if (wechatEnv && WX_APPID) {
     const authUrl = buildWechatAuthUrl(location.href)
     if (authUrl) { location.href = authUrl; return }
-  }
-  // ⚠️ 硬策略（2026-09-10）：任何场景禁用静默授权（包括 PC 端 / 外部浏览器 / AppID 缺失）。
-  // PC / 外部浏览器 → 优先开放平台「网站应用」扫码（后端配好 WX_OPEN_APPID 后自动启用）；
-  // 未配置 → 方案 B 扫码中转：PC 出二维码，手机微信扫码走 snsapi_userinfo 授权回传（有同意框）。
-  //   两条路都是用户主动授权，绝不 mock 自动建账号。
-  if (!wechatEnv) {
-    const cfg = await fetchAuthConfig()
-    if (cfg && cfg.pcWechatReady && cfg.wxOpenAppid) {
-      const pcAuthUrl = buildWechatPcAuthUrl(location.href, cfg.wxOpenAppid)
-      if (pcAuthUrl) { location.href = pcAuthUrl; return }
-    }
-    openPcQr() // 方案 B：H5 扫码中转
-    return
   }
   toast('微信授权未配置，请联系运营')
 }
@@ -192,25 +185,23 @@ const showAgreement = ref(false)
 const agreementTitle = ref('')
 const agreementText = ref('')
 
-// ===== PC 端微信登录·方案 B：扫码中转（无需微信开放平台审核，即刻可用） =====
-// PC 生成随机票据 → 二维码内容 = /login?pc=<ticket> → 手机微信扫码 → 公众号 snsapi_userinfo
-// 授权登录 → POST /auth/pc-approve 绑定 → PC 每 2s 轮询 /auth/pc-status → 拿同账号 token 登录。
-const showPcQr = ref(false)
+// ===== PC 端微信登录：二维码内嵌登录框 =====
+// 方案 A（开放平台 qrconnect，后端配好 WX_OPEN_APPID 后自动优先）→ 按钮跳微信官方扫码页；
+// 方案 B（H5 扫码中转，即刻可用）→ 登录框内直接渲染二维码并轮询票据。
+// ⚠️ 硬策略：两条路都是用户主动扫码授权，绝不静默建账号。
 const pcQrData = ref('')
 const pcQrExpired = ref(false)
 const pcUrl = ref('')
+const pcUseQrconnect = ref(false) // 方案 A 可用时改为官方扫码页
+const isMobileEnv = /android|iphone|ipad|ipod|windows phone|mobile/i.test(navigator.userAgent || '')
 let pcPollTimer = null
 
 function stopPcPoll() {
   if (pcPollTimer) { clearInterval(pcPollTimer); pcPollTimer = null }
 }
 
-function closePcQr() {
-  showPcQr.value = false
-  stopPcPoll()
-}
-
-async function openPcQr() {
+// 生成二维码并开始轮询（内嵌展示，打开登录页即出码，无需点按钮）
+async function genPcQr() {
   const ticket = genPcTicket()
   pcQrExpired.value = false
   pcUrl.value = location.origin + '/login?pc=' + ticket
@@ -220,19 +211,16 @@ async function openPcQr() {
     toast('二维码生成失败，请重试')
     return
   }
-  showPcQr.value = true
   stopPcPoll()
   const startAt = Date.now()
   pcPollTimer = setInterval(async () => {
-    if (!showPcQr.value) { stopPcPoll(); return }
-    if (Date.now() - startAt > 5 * 60 * 1000) { // 票据 TTL 5 分钟，过期出刷新
+    if (Date.now() - startAt > 5 * 60 * 1000) { // 票据 TTL 5 分钟
       stopPcPoll(); pcQrExpired.value = true; return
     }
     try {
       const d = await pcStatus(ticket)
       if (d && d.status === 'approved' && d.token) {
         stopPcPoll()
-        showPcQr.value = false
         const u = d.user || {}
         finishLogin({
           id: String(u.id || ''),
@@ -245,6 +233,28 @@ async function openPcQr() {
       }
     } catch (e) { /* 轮询瞬时失败静默重试 */ }
   }, 2000)
+}
+
+// 方案 A：跳微信开放平台官方扫码页（配好 WX_OPEN_APPID 后启用）
+async function onQrconnectLogin() {
+  if (!agreed.value) { toast('请先阅读并同意协议'); return }
+  const cfg = await fetchAuthConfig()
+  const authUrl = (cfg && cfg.pcWechatReady && cfg.wxOpenAppid)
+    ? buildWechatPcAuthUrl(location.href, cfg.wxOpenAppid)
+    : ''
+  if (authUrl) { location.href = authUrl; return }
+  pcUseQrconnect.value = false
+  genPcQr()
+}
+
+// PC 初始化：优先方案 A，否则方案 B 直接出码
+async function initPcLogin() {
+  const cfg = await fetchAuthConfig()
+  if (cfg && cfg.pcWechatReady && cfg.wxOpenAppid) {
+    pcUseQrconnect.value = true
+    return
+  }
+  genPcQr()
 }
 
 async function onCopyLink() {
@@ -326,6 +336,8 @@ onMounted(() => {
     }
     toast('请在手机微信中扫码打开')
   }
+  // PC / 外部浏览器：登录框内嵌二维码，打开即出码（方案 A 配好后自动优先官方扫码页）
+  if (!wechatEnv) initPcLogin()
 })
 
 onUnmounted(() => {
@@ -489,35 +501,45 @@ onUnmounted(() => {
   overflow-y: auto;
 }
 
-/* PC 端微信扫码登录弹窗（方案 B） */
-.pc-wx-modal {
-  width: rpx(640);
-}
-.pc-wx-tip-body {
-  text-align: center;
-  font-size: rpx(26);
-  line-height: 1.8;
-  color: var(--text-secondary);
-}
-.pc-qr-wrap {
-  position: relative;
-  margin: rpx(28) auto 0;
-  width: rpx(360);
-  height: rpx(360);
+/* 登录框内嵌微信扫码区（PC / 外部浏览器） */
+.qr-panel {
+  margin-top: rpx(8);
+  padding: rpx(32) rpx(24) rpx(28);
   background: #fff;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.qr-title {
+  font-size: rpx(30);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.qr-box {
+  position: relative;
+  margin-top: rpx(24);
+  width: rpx(320);
+  height: rpx(320);
   border: 1rpx solid var(--border-light);
   border-radius: rpx(16);
   display: flex;
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  background: #fff;
 }
-.pc-qr-img {
+.qr-img {
   width: 100%;
   height: 100%;
   display: block;
 }
-.pc-qr-expired {
+.qr-loading {
+  font-size: rpx(24);
+  color: var(--text-light);
+}
+.qr-expired {
   position: absolute;
   inset: 0;
   background: rgba(255, 255, 255, 0.96);
@@ -525,23 +547,36 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: rpx(20);
+  gap: rpx(18);
   font-size: rpx(26);
   color: var(--text-secondary);
 }
-.pc-qr-refresh {
+.qr-refresh {
   border: none;
   border-radius: 999rpx;
   background: var(--primary-gradient);
   color: #fff;
-  font-size: rpx(26);
-  padding: rpx(14) rpx(40);
+  font-size: rpx(25);
+  padding: rpx(14) rpx(36);
 }
-.pc-qr-hint {
-  margin-top: rpx(16);
+.qr-hint {
+  margin-top: rpx(20);
   text-align: center;
-  font-size: rpx(22);
+  font-size: rpx(23);
+  line-height: 1.7;
   color: var(--text-light);
+}
+.qr-hint-sub {
+  display: block;
+  font-size: rpx(21);
+  color: var(--text-light);
+}
+.qr-copy {
+  margin-top: rpx(18);
+  border: none;
+  background: transparent;
+  color: var(--primary);
+  font-size: rpx(24);
 }
 .pc-wx-acts {
   margin-top: rpx(28);
