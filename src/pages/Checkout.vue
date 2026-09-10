@@ -300,7 +300,7 @@
 <script setup>
 import { ref, computed, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { createOrder, getDeliveryDates } from '@/mock/api'
+import { createOrder, getDeliveryDates, payOrder } from '@/mock/api'
 import {
   groupedCart,
   totalPrice as cartTotal,
@@ -309,6 +309,7 @@ import {
   money
 } from '@/store'
 import store from '@/store'
+import { isWeChat, invokeWxPay } from '@/utils/wxpay'
 import NavBar from '@/components/NavBar.vue'
 import FlowerImage from '@/components/FlowerImage.vue'
 import AddressManager from '@/components/AddressManager.vue'
@@ -405,18 +406,46 @@ async function onSubmit() {
   }
   submitting.value = true
   const items = groupedCart.value.flatMap(g => g.items)
+  const firstShop = groupedCart.value[0] || {}
   const res = await createOrder({
+    shopId: firstShop.shopId || 'default',
+    shopName: firstShop.shopName || '',
     items,
     totalPrice: payAmount.value,
     address: store.selectedAddress,
     expectDeliveryTime: pickupMethod.value === 'delivery' ? deliveryTime.value : pickupTime.value,
     pickupMethod: pickupMethod.value,
+    pickupName: pickupContactName.value,
+    pickupPhone: pickupContactPhone.value,
     cardContent: cardFinalContent.value,
     remark: remark.value
   })
-  clearCart()
-  submitting.value = false
-  router.replace({ name: 'order-detail', params: { id: res.id } })
+  const outTradeNo = res.id
+  const shopId = (groupedCart.value[0] && groupedCart.value[0].shopId) || 'default'
+  const amountFen = payAmount.value
+  const tradeType = isWeChat() ? 'JSAPI' : 'H5'
+  const openid = (store.userInfo && store.userInfo.openid) || ''
+  try {
+    const pay = await payOrder({ shopId, outTradeNo, amountFen, description: '跳舞兰AI花店订单', openid, tradeType })
+    if (pay.tradeType === 'H5' && pay.h5_url) {
+      clearCart()
+      submitting.value = false
+      location.href = pay.h5_url // 跳微信 App 收银台（外部浏览器）
+      return
+    }
+    if (pay.tradeType === 'JSAPI') {
+      await invokeWxPay(pay) // 微信内拉起收银台
+    }
+    clearCart()
+    submitting.value = false
+    router.replace({ name: 'order-detail', params: { id: outTradeNo } })
+  } catch (e) {
+    // 支付未调起（如微信内缺 openid）：订单已建，引导去订单页稍后支付
+    clearCart()
+    submitting.value = false
+    toast('订单已创建，可稍后在订单页完成支付')
+    router.replace({ name: 'order-detail', params: { id: outTradeNo } })
+  }
 }
 
 const toastText = ref('')

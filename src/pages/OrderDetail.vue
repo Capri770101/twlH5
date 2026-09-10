@@ -104,13 +104,14 @@
           <span class="info-label">💌 贺卡</span>
           <span class="info-value card-content">{{ order.cardContent }}</span>
         </div>
-        <div v-if="order._canRefund" class="info-row aftersale-entry" @click="toast('售后页面开发中')">
+        <div v-if="order._canRefund" class="info-row aftersale-entry" @click="showRefund = true">
           <span class="info-label">售后服务</span>
           <div class="aftersale-entry-value">
             <span>申请售后/退款</span>
             <span class="aftersale-entry-arrow">›</span>
           </div>
         </div>
+        <RefundDialog v-model:visible="showRefund" :order="order" @success="onRefundSuccess" @error="toast" />
       </div>
 
       <!-- 订单评价 -->
@@ -151,6 +152,7 @@ import { getOrderDetail } from '@/mock/api'
 import { money } from '@/store'
 import NavBar from '@/components/NavBar.vue'
 import FlowerImage from '@/components/FlowerImage.vue'
+import RefundDialog from '@/components/RefundDialog.vue'
 
 const route = useRoute()
 const rpx = n => `${n / 750}rem`
@@ -204,6 +206,14 @@ function toast(text) {
   toastText.value = text
   clearTimeout(toastTimer)
   toastTimer = setTimeout(() => { toastText.value = '' }, 1600)
+}
+
+const showRefund = ref(false)
+function onRefundSuccess() {
+  if (order.value) {
+    order.value = { ...order.value, status: 'refunding', statusText: '退款中' }
+  }
+  toast('已提交退款申请，商家处理中')
 }
 
 onMounted(async () => {

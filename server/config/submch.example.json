@@ -1,0 +1,5 @@
+{
+  "s001": { "subMchid": "1900000109", "subAppid": "wxXXXXXXXXXXXX", "settleRatio": 5 },
+  "s005": { "subMchid": "1900000110", "subAppid": "wxYYYYYYYYYYYY", "settleRatio": 5 },
+  "s007": { "subMchid": "1900000111", "subAppid": "", "settleRatio": 5 }
+}

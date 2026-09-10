@@ -79,6 +79,7 @@
             @pay="onCardPay"
             @order="onCardOrder"
             @view-order="onViewOrder"
+            @save-diy-plan="onSaveDiyPlan"
           />
 
           <!-- 效果图（轮询任务回填） -->
@@ -169,6 +170,7 @@ import FlowerImage from '@/components/FlowerImage.vue'
 import store, { addToCart } from '@/store'
 import AdvisorCards from '@/components/AdvisorCards.vue'
 import { chatWithAdvisor, streamAdvisorChat, pollAgentTask, ADVISOR_PRESETS, AGENT_CONFIG } from '@/mock/api'
+import { extractDiyPlan, isDiyScene } from '@/utils/extractDiyPlan'
 
 const router = useRouter()
 
@@ -368,9 +370,13 @@ async function sendMessage() {
           scrollToBottom()
         } else if (ev.event === 'done') {
           if (ev.data && ev.data.session_id) sessionId.value = ev.data.session_id
+          attachDiyPlan(cur())
         }
       }
     })
+
+    // 兜底：若平台没发 done（异常中断等），流结束后再尝试一次（幂等）
+    attachDiyPlan(cur())
 
     if (r && (r.ok || r.gotAny)) {
       agentMode.value = 'real'
@@ -510,6 +516,49 @@ function buyPlan(plan) {
   })
   toast('方案已加入购物车')
   setTimeout(() => router.push({ name: 'checkout' }), 280)
+}
+
+// DIY 场景兜底：平台调了 generate_diy_plan 但没 emit card 事件时，
+// 从流完的文本里启发式提取方案并合成 diy_plan_card（平台发了卡则跳过，不重复）
+function attachDiyPlan(msg) {
+  if (!msg || !msg.text) return
+  if ((msg.cards || []).some(c => c.ui === 'diy_plan_card')) return
+  if (!isDiyScene(msg.text, msg.tools)) return
+  let plan = null
+  try { plan = extractDiyPlan(msg.text) } catch (e) { plan = null }
+  if (!plan) return
+  if (!msg.cards) msg.cards = []
+  msg.cards.push({ ui: 'diy_plan_card', data: plan })
+  scrollToBottom()
+}
+
+// DIY 方案「保存到我的方案」 → localStorage（结构同收藏）
+const DIY_PLANS_KEY = 'twl-diy-plans'
+function onSaveDiyPlan(plan) {
+  if (!plan || !plan.id) { toast('方案数据缺失，保存失败'); return }
+  try {
+    const raw = localStorage.getItem(DIY_PLANS_KEY)
+    const arr = raw ? JSON.parse(raw) : []
+    const filtered = (Array.isArray(arr) ? arr : []).filter(x => x && x.id !== plan.id)
+    filtered.unshift({
+      id: plan.id,
+      name: plan.name,
+      desc: plan.desc || '',
+      price: plan.price,
+      image: plan.image || '',
+      materials: plan.materials || [],
+      budget: plan.budget || [],
+      careTips: plan.careTips || '',
+      greeting: plan.greeting || '',
+      skillLevel: plan.skillLevel || '',
+      suitableFor: plan.suitableFor || '',
+      savedAt: Date.now()
+    })
+    localStorage.setItem(DIY_PLANS_KEY, JSON.stringify(filtered.slice(0, 30)))
+    toast('已保存到「我的方案」')
+  } catch (e) {
+    toast('保存失败，请稍后再试')
+  }
 }
 
 // 与 Home/Cart 等页面一致的轻量 toast

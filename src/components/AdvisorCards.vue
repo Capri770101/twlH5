@@ -111,6 +111,68 @@
       </div>
     </template>
 
+    <!-- ===== DIY 方案卡 diy_plan_card ===== -->
+    <template v-else-if="ui === 'diy_plan_card'">
+      <div class="diy-card">
+        <FlowerImage v-if="diyPlan.image" :src="diyPlan.image" :emoji="'💐'" class="diy-img" />
+        <div v-else class="diy-img placeholder">💐<span>效果图生成中</span></div>
+
+        <div class="diy-body">
+          <div class="diy-head">
+            <div class="diy-name text-ellipsis">{{ diyPlan.name || 'DIY 方案' }}</div>
+            <div class="diy-price">¥{{ diyPlan.priceText }}</div>
+          </div>
+          <div v-if="diyPlan.desc" class="diy-desc">{{ diyPlan.desc }}</div>
+
+          <div class="diy-tags" v-if="diyPlan.skillLevel || diyPlan.suitableFor">
+            <span v-if="diyPlan.skillLevel" class="diy-tag skill" :class="diyPlan.skillLevel">{{ diyPlan.skillLevel }}</span>
+            <span v-if="diyPlan.suitableFor" class="diy-tag">{{ diyPlan.suitableFor }}</span>
+          </div>
+
+          <div v-if="diyPlan.materials.length" class="diy-section">
+            <div class="diy-section-title">🌿 花材清单</div>
+            <div class="diy-mats">
+              <div v-for="(m, i) in diyPlan.materials" :key="i" class="diy-mat">
+                <span class="diy-mat-name">{{ m.name }}</span>
+                <span class="diy-mat-qty">{{ m.qty > 0 ? '×' + m.qty + (m.unit || '支') : '适量' }}</span>
+                <span v-if="m.subText" class="diy-mat-sub">{{ m.subText }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="diyPlan.budget.length" class="diy-section">
+            <div class="diy-section-title">💰 预算明细</div>
+            <div class="diy-budget">
+              <div v-for="(b, i) in diyPlan.budget" :key="i" class="diy-budget-row">
+                <span>{{ b.label }}</span>
+                <span class="diy-budget-num">¥{{ b.amountText }}</span>
+              </div>
+              <div v-if="diyPlan.budgetTotalText" class="diy-budget-total">
+                <span>合计</span>
+                <span class="diy-budget-num">¥{{ diyPlan.budgetTotalText }}</span>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="diyPlan.careTips" class="diy-section diy-care">
+            <div class="diy-section-title">💧 养护贴士</div>
+            <div class="diy-text">{{ diyPlan.careTips }}</div>
+          </div>
+
+          <div v-if="diyPlan.greeting" class="diy-section diy-greet">
+            <div class="diy-section-title">💌 贺卡建议</div>
+            <div class="diy-text">{{ diyPlan.greeting }}</div>
+            <span class="diy-copy" @click="copyText(diyPlan.greeting, '贺卡文案已复制')">一键复制</span>
+          </div>
+
+          <div class="diy-acts">
+            <span class="diy-act ghost" @click="$emit('save-diy-plan', diyPlan)">保存到我的方案</span>
+            <span class="diy-act primary" @click="$emit('buy', { item: diyPlan.buyItem, mode: 'cart' })">加入购物车</span>
+          </div>
+        </div>
+      </div>
+    </template>
+
     <!-- ===== 对话选项 dialog_options ===== -->
     <template v-else-if="ui === 'dialog_options'">
       <div class="adv-opts">
@@ -133,7 +195,7 @@ import { pollAgentTask, AGENT_CONFIG } from '@/mock/api'
 const props = defineProps({
   card: { type: Object, default: () => ({}) }
 })
-defineEmits(['buy', 'send', 'pay', 'order', 'view-order'])
+defineEmits(['buy', 'send', 'pay', 'order', 'view-order', 'save-diy-plan'])
 
 function fmt(n) {
   const v = Number(n)
@@ -205,6 +267,86 @@ const payAmount = computed(() => {
 const options = computed(() => (P.value.options || []).map(o => ({ label: o.label || o.text || '', value: o.value != null ? o.value : (o.label || o.text || '') })))
 
 const greet = computed(() => P.value)
+
+// ===== DIY 方案卡 diy_plan_card =====
+const diyPlan = computed(() => {
+  const d = P.value || {}
+  const priceRaw = Number(d.price != null ? d.price : d.price_yuan != null ? d.price_yuan : 0)
+  // 容错：若价格 > 10000 猜成"分"，自动 /100
+  const price = priceRaw > 10000 ? priceRaw / 100 : priceRaw
+  const materials = (d.materials || []).map(m => {
+    const qty = Number(m.qty != null ? m.qty : m.quantity || 0)
+    const sub = Number(m.price_yuan != null ? m.price_yuan : m.unit_price || 0)
+    const subText = sub ? '¥' + sub.toFixed(2) + (qty ? ' × ' + qty + (m.unit || '支') : '') : ''
+    return {
+      name: m.name || '花材',
+      qty: qty || 0,
+      unit: m.unit || '支',
+      subText,
+      _sub: sub,
+      _qty: qty
+    }
+  })
+  const budget = (d.budget || []).map(b => ({
+    label: b.label || '其他',
+    amount: Number(b.amount_yuan != null ? b.amount_yuan : b.amount != null ? b.amount : 0),
+    amountText: (Number(b.amount_yuan != null ? b.amount_yuan : b.amount != null ? b.amount : 0)).toFixed(2)
+  }))
+  const budgetTotal = budget.reduce((s, b) => s + b.amount, 0)
+  const id = String(d.plan_id != null ? d.plan_id : d.id != null ? d.id : ('diy_' + Date.now()))
+  const name = d.name || 'DIY 方案'
+  const skillLevel = d.skill_level || ''
+  const suitableFor = d.suitable_for || ''
+  const careTips = d.care_tips || ''
+  const greeting = d.greeting_suggestion || d.greeting || ''
+  // 构造加购用的 buyItem（兼容现有 onCardBuy）
+  const buyItem = {
+    id: 'diy_' + id,
+    name,
+    price,
+    priceText: price ? price.toFixed(2) : '到店咨询',
+    image: d.effect_image_url || d.image_url || d.image || '',
+    desc: d.desc || '',
+    stock: 99,
+    shopId: d.shop_id || 'default',
+    merchant: d.merchant_name || d.merchant || 'AI 定制',
+    _isDiy: true,
+    _diyPayload: d
+  }
+  return {
+    id,
+    name,
+    desc: d.desc || '',
+    price,
+    priceText: price ? price.toFixed(2) : '到店咨询',
+    image: d.effect_image_url || d.image_url || d.image || '',
+    skillLevel,
+    suitableFor,
+    materials,
+    budget,
+    budgetTotalText: budgetTotal ? budgetTotal.toFixed(2) : '',
+    careTips,
+    greeting,
+    buyItem
+  }
+})
+
+function copyText(t, hint) {
+  const text = String(t || '')
+  if (!text) return
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => showHint(hint || '已复制'))
+  } else {
+    showHint('已复制：' + text.slice(0, 20))
+  }
+}
+const copyHint = ref('')
+let copyTimer = null
+function showHint(t) {
+  copyHint.value = t
+  clearTimeout(copyTimer)
+  copyTimer = setTimeout(() => { copyHint.value = '' }, 1500)
+}
 
 // 生图任务：有结果直接展示，否则轮询 /tasks/{id}
 const taskImage = ref(P.value.result_url || P.value.image_url || '')
@@ -500,6 +642,163 @@ onMounted(() => {
   color: #6b625c;
   font-size: rpx(21);
 }
+
+/* ===== DIY 方案卡 diy_plan_card ===== */
+.diy-card {
+  border: 1rpx solid #ece7e0;
+  border-radius: rpx(18);
+  background: linear-gradient(180deg, #fff7f2 0%, #ffffff 60%);
+  overflow: hidden;
+}
+.diy-img {
+  width: 100%;
+  height: rpx(360);
+  display: block;
+  background: #f4f1ed;
+  :deep(img) { width: 100%; height: 100%; object-fit: cover; }
+}
+.diy-img.placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: rpx(8);
+  font-size: rpx(64);
+  color: #c0b8b1;
+  span { font-size: rpx(22); color: #a39a93; }
+}
+.diy-body { padding: rpx(18) rpx(20) rpx(20); }
+.diy-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: rpx(12);
+}
+.diy-name {
+  flex: 1;
+  min-width: 0;
+  font-size: rpx(28);
+  font-weight: 700;
+  color: #332c28;
+}
+.diy-price {
+  flex: none;
+  color: #e8615d;
+  font-size: rpx(32);
+  font-weight: 800;
+}
+.diy-desc {
+  margin-top: rpx(8);
+  font-size: rpx(22);
+  color: #8d8580;
+  line-height: 1.5;
+}
+.diy-tags {
+  margin-top: rpx(12);
+  display: flex;
+  gap: rpx(8);
+  flex-wrap: wrap;
+}
+.diy-tag {
+  padding: rpx(5) rpx(14);
+  border-radius: 999rpx;
+  font-size: rpx(20);
+  font-weight: 600;
+  background: #f6f3ee;
+  color: #6b625c;
+}
+.diy-tag.skill.新手 { background: #eaf6ee; color: #3f8f68; }
+.diy-tag.skill.进阶 { background: #fff3e0; color: #b8731f; }
+.diy-tag.skill.高阶 { background: #fdeee9; color: #d9745f; }
+
+.diy-section { margin-top: rpx(18); }
+.diy-section-title {
+  font-size: rpx(22);
+  font-weight: 700;
+  color: #6b625c;
+  margin-bottom: rpx(8);
+}
+.diy-mats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: rpx(8);
+}
+.diy-mat {
+  display: flex;
+  flex-direction: column;
+  gap: rpx(2);
+  padding: rpx(8) rpx(14);
+  background: #fff;
+  border: 1rpx solid #ece7e0;
+  border-radius: rpx(12);
+  min-width: rpx(140);
+}
+.diy-mat-name { font-size: rpx(22); color: #332c28; font-weight: 600; }
+.diy-mat-qty { font-size: rpx(20); color: #e8615d; font-weight: 700; }
+.diy-mat-sub { font-size: rpx(18); color: #a39a93; }
+
+.diy-budget {
+  padding: rpx(12) rpx(16);
+  background: #fff;
+  border: 1rpx solid #ece7e0;
+  border-radius: rpx(12);
+}
+.diy-budget-row {
+  display: flex;
+  justify-content: space-between;
+  padding: rpx(5) 0;
+  font-size: rpx(23);
+  color: #5c524d;
+}
+.diy-budget-num { color: #332c28; font-weight: 600; }
+.diy-budget-total {
+  display: flex;
+  justify-content: space-between;
+  padding-top: rpx(8);
+  margin-top: rpx(6);
+  border-top: 1rpx dashed #ece7e0;
+  font-size: rpx(24);
+  font-weight: 700;
+  color: #332c28;
+}
+
+.diy-care, .diy-greet {
+  padding: rpx(14) rpx(16);
+  background: #fff;
+  border: 1rpx solid #ece7e0;
+  border-radius: rpx(12);
+}
+.diy-text { font-size: rpx(22); color: #4e4641; line-height: 1.55; }
+.diy-greet { position: relative; padding-bottom: rpx(40); }
+.diy-copy {
+  position: absolute;
+  right: rpx(12);
+  bottom: rpx(10);
+  padding: rpx(4) rpx(12);
+  background: #251f1c;
+  color: #fff;
+  border-radius: 999rpx;
+  font-size: rpx(18);
+  font-weight: 600;
+}
+
+.diy-acts {
+  display: flex;
+  gap: rpx(12);
+  margin-top: rpx(18);
+}
+.diy-act {
+  flex: 1;
+  height: rpx(64);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: rpx(32);
+  font-size: rpx(24);
+  font-weight: 700;
+}
+.diy-act.ghost { background: #f6f3ee; color: #6b625c; }
+.diy-act.primary { background: #251f1c; color: #fff; }
 
 /* 选项 */
 .adv-opts {

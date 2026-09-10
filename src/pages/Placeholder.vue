@@ -55,6 +55,14 @@
         <span class="m-left">🛒 我的购物车</span>
         <span class="m-arrow">›</span>
       </li>
+      <li @click="router.push({ name: 'favorites' })">
+        <span class="m-left">❤️ 我的收藏</span>
+        <span class="m-arrow">›</span>
+      </li>
+      <li @click="router.push({ name: 'my-coupons' })">
+        <span class="m-left">🎫 我的优惠券</span>
+        <span class="m-arrow">›</span>
+      </li>
       <li @click="router.push({ name: 'advisor' })">
         <span class="m-left">🤖 AI 花艺顾问</span>
         <span class="m-arrow">›</span>

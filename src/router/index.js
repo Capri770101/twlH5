@@ -14,7 +14,11 @@ const routes = [
   { path: '/shops', name: 'shops', component: () => import('@/pages/Shops.vue') },
   { path: '/advisor', name: 'advisor', component: () => import('@/pages/Advisor.vue') },
   { path: '/login', name: 'login', component: () => import('@/pages/Login.vue') },
-  { path: '/settings', name: 'settings', component: () => import('@/pages/Settings.vue'), meta: { requiresAuth: true } }
+  { path: '/settings', name: 'settings', component: () => import('@/pages/Settings.vue'), meta: { requiresAuth: true } },
+  { path: '/favorites', name: 'favorites', component: () => import('@/pages/Favorites.vue') },
+  { path: '/coupons', name: 'coupons', component: () => import('@/pages/CouponCenter.vue') },
+  { path: '/my-coupons', name: 'my-coupons', component: () => import('@/pages/MyCoupons.vue') },
+  { path: '/search', name: 'search', component: () => import('@/pages/Search.vue') }
 ]
 
 // 开发态卡片自检页（仅本地 dev，不进生产包）

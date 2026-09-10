@@ -3,13 +3,7 @@ node_modules/
 
 # 构建产物（沙箱多次构建产物目录，统一忽略）
 dist/
-dist-build/
-dist-v2/
-dist-v3/
-dist-v4/
-dist-v5/
-dist-v6/
-dist-ssr/
+dist-*/
 
 # WorkBuddy 内部数据（迁移笔记等，非项目源码）
 .workbuddy/
@@ -23,6 +17,12 @@ Thumbs.db
 # 环境变量
 .env
 .env.*
+
+# 微信支付商户证书（含私钥，切勿入库）
+server/certs/
+
+# 门店→子商户号真实映射（含商户号，模板见 server/config/submch.example.json）
+server/config/submch.json
 
 # 浏览器自动化残留（agent-browser skill 临时目录，非项目源码）
 .playwright-mcp/

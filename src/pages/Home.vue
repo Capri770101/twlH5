@@ -11,7 +11,7 @@
 
     <!-- ===== 搜索栏 ===== -->
     <div class="search-section">
-      <div class="search-bar">
+      <div class="search-bar" @click="goSearch">
         <span class="line-search-mark line-search-mark-compact"></span>
         <span class="search-placeholder">搜索花束、花店...</span>
       </div>
@@ -56,6 +56,16 @@
         <span class="ai-entry-sub">说说故事，AI 帮你搭配一束刚刚好的花</span>
       </div>
       <span class="ai-entry-arrow">›</span>
+    </section>
+
+    <!-- ===== 领券中心入口 ===== -->
+    <section class="coupon-entry" @click="router.push({ name: 'coupons' })">
+      <div class="coupon-entry-icon">🎫</div>
+      <div class="coupon-entry-text">
+        <span class="coupon-entry-title">领券中心</span>
+        <span class="coupon-entry-sub">新人券、满减券限时领取</span>
+      </div>
+      <span class="coupon-entry-arrow">›</span>
     </section>
 
     <!-- ===== 同城花店 ===== -->
@@ -189,6 +199,10 @@ function bannerStyle(item) {
 
 function goDetail(item) {
   router.push({ name: 'detail', params: { id: item.id } })
+}
+
+function goSearch() {
+  router.push({ name: 'search' })
 }
 
 function toShop(id) {
@@ -625,6 +639,55 @@ onUnmounted(() => {
   text-overflow: ellipsis;
 }
 .ai-entry-arrow {
+  font-size: rpx(40);
+  color: var(--text-light);
+  flex-shrink: 0;
+}
+
+/* 领券中心入口 */
+.coupon-entry {
+  display: flex;
+  align-items: center;
+  gap: rpx(20);
+  margin: rpx(20) rpx(24) 0;
+  padding: rpx(26) rpx(28);
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, #fff7f4 0%, #fff0f0 55%, #ffe9e6 100%);
+  border: 1rpx solid rgba(232, 97, 93, 0.18);
+  box-shadow: 0 rpx(12) rpx(36) rgba(83, 62, 48, 0.06);
+  cursor: pointer;
+}
+.coupon-entry-icon {
+  width: rpx(72);
+  height: rpx(72);
+  border-radius: rpx(20);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #ffe2dd;
+  font-size: rpx(40);
+  flex-shrink: 0;
+}
+.coupon-entry-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.coupon-entry-title {
+  font-size: rpx(30);
+  font-weight: 800;
+  color: #e8615d;
+}
+.coupon-entry-sub {
+  margin-top: rpx(6);
+  font-size: rpx(22);
+  color: var(--text-light);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.coupon-entry-arrow {
   font-size: rpx(40);
   color: var(--text-light);
   flex-shrink: 0;

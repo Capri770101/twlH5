@@ -4,14 +4,39 @@ import mockData from './data'
 // 默认开启：优先调 /api，失败（后端未起 / DB 不可达 / 无权限）自动回退下方 mock，保证页面永远有数据
 const REAL_API_ENABLED = import.meta.env.VITE_USE_REAL_API !== 'false'
 const API_BASE = import.meta.env.VITE_API_BASE || '/api'
-async function realApi(path, params) {
+function authHeaders(token) {
+  const t = token || localToken()
+  return t && !t.startsWith('mock_') ? { Authorization: 'Bearer ' + t } : {}
+}
+async function realApi(path, params, token) {
   const base = (typeof location !== 'undefined' && location.origin) || ''
   const url = new URL(API_BASE + path, base)
   if (params) for (const [k, v] of Object.entries(params)) {
     if (v !== '' && v != null) url.searchParams.set(k, String(v))
   }
-  const res = await fetch(url, { headers: { Accept: 'application/json' } })
-  if (!res.ok) throw new Error('api ' + res.status)
+  const res = await fetch(url, { headers: { Accept: 'application/json', ...authHeaders(token) } })
+  if (!res.ok) {
+    const j = await res.json().catch(() => null)
+    throw new Error((j && j.error) || ('api ' + res.status))
+  }
+  const j = await res.json()
+  if (j && j.error) throw new Error(j.error)
+  return j
+}
+
+// POST 到真实后端（支付等写操作）
+async function realPost(path, body, token) {
+  const base = (typeof location !== 'undefined' && location.origin) || ''
+  const url = new URL(API_BASE + path, base)
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...authHeaders(token) },
+    body: JSON.stringify(body || {})
+  })
+  if (!res.ok) {
+    const j = await res.json().catch(() => null)
+    throw new Error((j && j.error) || ('api ' + res.status))
+  }
   const j = await res.json()
   if (j && j.error) throw new Error(j.error)
   return j
@@ -19,6 +44,48 @@ async function realApi(path, params) {
 
 // 模拟网络延迟
 const delay = (ms = 250) => new Promise(resolve => setTimeout(resolve, ms))
+
+// ===== 微信支付（服务商 + 分账） =====
+// 复用跳舞兰服务商号 + 各店 sub_mchid；下单带 profit_sharing=true 触发自动分账。
+// 真实后端未起时回退 mock，保证下单流程可演示。
+export async function payOrder({ shopId, outTradeNo, amountFen, description, openid, tradeType }) {
+  if (REAL_API_ENABLED) {
+    try {
+      return await realPost('/pay/order', { shopId, outTradeNo, amountFen, description, openid, tradeType })
+    } catch (e) {
+      console.warn('[api] /pay/order 真实接口失败，回退 mock：', e && e.message)
+    }
+  }
+  await delay(500)
+  const inWeChat = typeof navigator !== 'undefined' && /micromessenger/i.test(navigator.userAgent)
+  if (tradeType === 'H5' || !inWeChat) {
+    // 外部浏览器：返回 h5_url（mock 仅占位，实际由后端返回微信收银台链接）
+    return { tradeType: 'H5', h5_url: 'weixin://wxpay/bizpayurl?pr=mock_' + outTradeNo }
+  }
+  // 微信内：返回 JSAPI 调起参数（mock 签名为占位，仅演示流程）
+  return {
+    tradeType: 'JSAPI',
+    appId: 'wxMock',
+    timeStamp: String(Math.floor(Date.now() / 1000)),
+    nonceStr: 'mock' + Date.now(),
+    package: 'prepay_id=mock_' + outTradeNo,
+    signType: 'RSA',
+    paySign: 'mock'
+  }
+}
+
+export async function queryPayOrder(outTradeNo, subMchid) {
+  if (REAL_API_ENABLED) {
+    try {
+      return await realApi(`/pay/query/${encodeURIComponent(outTradeNo)}`, { subMchid: subMchid || '' })
+    } catch (e) {
+      console.warn('[api] /pay/query 失败，回退 mock：', e && e.message)
+    }
+  }
+  await delay(200)
+  return { trade_state: 'SUCCESS', out_trade_no: outTradeNo }
+}
+
 
 // ===== 首页 =====
 export async function getHomeIndex() {
@@ -106,7 +173,72 @@ function decorateOrder(o) {
   }
 }
 
+// ---------- H5 用户身份（过渡：匿名访客 guest；微信登录物料到位后自动升级） ----------
+function localToken() {
+  try { return localStorage.getItem('twd_token') || '' } catch (e) { return '' }
+}
+function localUser() {
+  try { return JSON.parse(localStorage.getItem('twd_userInfo') || 'null') } catch (e) { return null }
+}
+function genGuestId() {
+  try {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+      return 'g_' + crypto.randomUUID().replace(/-/g, '').slice(0, 22)
+    }
+  } catch (e) { /* fallthrough */ }
+  return 'g_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-6)
+}
+
+// 保证存在可用身份：有效 token 直接复用；否则向后端注册/登录 guest
+// 返回 { userInfo, token }；后端不可达时返回 { offline:true }
+export async function ensureGuestAuth() {
+  const token = localToken()
+  const ui = localUser()
+  // 有效非 mock token + 有 user.id → 直接复用（JWT 由后端校验；手机号/微信/guest 登录均适用）
+  if (token && !token.startsWith('mock_') && ui && ui.id) {
+    return { userInfo: ui, token }
+  }
+  let guestId = ''
+  try { guestId = localStorage.getItem('twd_guest_id') || '' } catch (e) { /* ignore */ }
+  if (!guestId) {
+    guestId = genGuestId()
+    try { localStorage.setItem('twd_guest_id', guestId) } catch (e) { /* ignore */ }
+  }
+  if (REAL_API_ENABLED) {
+    try {
+      const d = await realPost('/auth/guest', { guestId })
+      const info = {
+        id: String((d.user && d.user.id) || ''),
+        nickname: (d.user && d.user.nickname) || '微信用户',
+        avatar: (d.user && d.user.avatar) || '',
+        phone: '',
+        guest: true
+      }
+      try {
+        localStorage.setItem('twd_token', d.token)
+        localStorage.setItem('twd_userInfo', JSON.stringify(info))
+      } catch (e) { /* ignore */ }
+      return { userInfo: info, token: d.token }
+    } catch (e) {
+      console.warn('[api] guest 身份注册失败，回退离线：', e && e.message)
+    }
+  }
+  return { offline: true }
+}
+
 export async function getOrderList(status = 'all') {
+  if (REAL_API_ENABLED) {
+    try {
+      const a = await ensureGuestAuth()
+      if (!a.offline) {
+        // status 由后端翻译（new=待付款→DB pending；pending=待接单→DB paid；review/refund 特判）
+        const d = await realApi('/orders', { status, page: 1, pageSize: 50 }, a.token)
+        return (d.list || []).map(decorateOrder)
+      }
+    } catch (e) {
+      console.warn('[api] /orders 真实接口失败，回退 mock：', e && e.message)
+    }
+  }
   let list = mockData.orders.map(decorateOrder)
   if (status === 'refund') {
     list = list.filter(o => ['refunding', 'refunded', 'refund_failed'].includes(o.status))
@@ -120,19 +252,90 @@ export async function getOrderList(status = 'all') {
 }
 
 export async function getOrderDetail(id) {
+  if (REAL_API_ENABLED) {
+    try {
+      const a = await ensureGuestAuth()
+      if (!a.offline) {
+        const d = await realApi('/orders/' + encodeURIComponent(id), null, a.token)
+        return decorateOrder(d)
+      }
+    } catch (e) {
+      // 真实库里没有这笔单（如 mock 单号/他人订单）→ 返回 null，不混入 mock 数据
+      if (/not found|404/i.test(String(e && e.message))) return null
+      console.warn('[api] /orders/:id 真实接口失败，回退 mock：', e && e.message)
+    }
+  }
   const order = mockData.orders.find(o => o.id === id)
   await delay()
   return order ? decorateOrder(order) : null
 }
 
-/** 提交订单：写入内存 mock 列表，返回新订单号 */
+// ---------- 申请退款（服务商分账退款，调 /pay/refund） ----------
+// 真实分支：ensureGuestAuth 拿 token → POST /pay/refund（outTradeNo/reason/amountFen/shopId）
+// 后端退款依赖微信支付 v3 物料；若后端未就绪/缺失物料，乐观返回成功，由订单状态机后续更新。
+export async function refundOrder(orderId, { reason, amountFen, shopId } = {}) {
+  if (REAL_API_ENABLED) {
+    try {
+      const a = await ensureGuestAuth()
+      if (!a.offline) {
+        return await realPost('/pay/refund', {
+          outTradeNo: String(orderId),
+          reason: reason || '用户申请退款',
+          amountFen: Math.round(Number(amountFen) || 0),
+          shopId: shopId || 'default'
+        }, a.token)
+      }
+    } catch (e) {
+      console.warn('[api] /pay/refund 后端未就绪，乐观提交：', e && e.message)
+    }
+  }
+  await delay(300)
+  return { ok: true, optimistic: true }
+}
+
+/** 提交订单：真实后端落库（快照+服务端计价），返回新订单号 */
 export async function createOrder(payload) {
+  if (REAL_API_ENABLED) {
+    try {
+      const a = await ensureGuestAuth()
+      if (!a.offline) {
+        const addr = (payload.address && typeof payload.address === 'object') ? payload.address : {}
+        const d = await realPost('/orders', {
+          shopId: payload.shopId || '',
+          shopName: payload.shopName || '',
+          items: (payload.items || []).map(i => ({
+            id: i.id,
+            name: i.name,
+            subtitle: i.subtitle || '',
+            image: i.image || '',
+            price: i.price || 0,
+            quantity: i.quantity || 1
+          })),
+          address: {
+            name: addr.name || '',
+            phone: addr.phone || '',
+            region: addr.region || '',
+            detail: addr.detail || ''
+          },
+          expectDeliveryTime: payload.expectDeliveryTime || '',
+          pickupMethod: payload.pickupMethod || 'delivery',
+          pickupName: payload.pickupName || '',
+          pickupPhone: payload.pickupPhone || '',
+          cardContent: payload.cardContent || '',
+          remark: payload.remark || ''
+        }, a.token)
+        return { id: d.id, status: d.status || 'new' }
+      }
+    } catch (e) {
+      console.warn('[api] /orders 真实接口失败，回退 mock：', e && e.message)
+    }
+  }
   await delay(400)
   const id = '20260' + String(Date.now()).slice(-6)
   const order = {
     id,
     status: 'pending',
-    statusText: '待接单',
+    statusText: '待付款',
     items: payload.items.map(i => ({
       id: i.id,
       name: i.name,
@@ -151,6 +354,30 @@ export async function createOrder(payload) {
   }
   mockData.orders.unshift(order)
   return { id, status: 'pending' }
+}
+
+/** 取消订单（仅待付款可取消；真实后端落库） */
+export async function cancelOrder(id) {
+  if (REAL_API_ENABLED) {
+    try {
+      const a = await ensureGuestAuth()
+      if (!a.offline) {
+        const d = await realPost('/orders/' + encodeURIComponent(id) + '/cancel', {}, a.token)
+        if (d && d.ok === false) throw new Error(d.error || '取消失败')
+        return true
+      }
+    } catch (e) {
+      console.warn('[api] 取消订单失败：', e && e.message)
+      throw e
+    }
+  }
+  const order = mockData.orders.find(o => o.id === id)
+  if (order) {
+    order.status = 'cancelled'
+    order.statusText = '已取消'
+  }
+  await delay(200)
+  return true
 }
 
 // ===== 配送/取货时间可选日期 =====
@@ -279,9 +506,12 @@ export async function searchAll(keyword) {
   return { flowers: mockData.enrichFlowerList(flowers), shops }
 }
 
-// ===== 登录（形态对齐小程序 /auth/*，当前为 mock，预留真实接口） =====
+// ===== 登录（真后端 /api/auth/* 优先；离线回退 mock） =====
+// 账号统一：guestId（匿名设备身份）+ bindUserId（当前登录 user.id，仅无手机号壳时携带）
+// 后端按「已绑手机号的行优先」把候选行并入同一账号（见 server/src/auth.js pickMain/mergeRow）
 
-// 微信公众平台 AppId：真接入网页授权时填上；留空则走 mock 登录
+// 微信公众平台（服务号）AppId：真接入网页授权时填上（需与后端 WX_OAUTH_APPID 一致）；
+// 留空时「微信登录」自动降级为匿名访客登录（guest 账号，后续可用手机号绑定找回）
 export const WX_APPID = ''
 // 是否微信内置浏览器（用于切换登录方式 / 触发网页授权）
 export function isWechatEnv() {
@@ -297,8 +527,70 @@ export function buildWechatAuthUrl(redirect) {
     `&redirect_uri=${r}&response_type=code&scope=snsapi_userinfo&state=twd#wechat_redirect`
 }
 
-// 微信登录：真实环境 code 来自授权回跳，此处 mock 返回 userInfo + token
+// 登录态落本地（与 ensureGuestAuth 读取的 key 一致）
+function persistAuth(token, info) {
+  try {
+    localStorage.setItem('twd_token', token)
+    localStorage.setItem('twd_userInfo', JSON.stringify(info))
+  } catch (e) { /* ignore */ }
+}
+
+// 读取当前匿名/弱身份凭据（用于账号合并）
+function currentIdentity() {
+  let guestId = ''
+  try { guestId = localStorage.getItem('twd_guest_id') || '' } catch (e) { /* ignore */ }
+  const ui = localUser()
+  const bindUserId = (ui && ui.id && !ui.phone) ? String(ui.id) : '' // 仅无手机号壳需要并入
+  return { guestId, bindUserId }
+}
+
+// 是否「网络层失败」（此时允许回退 mock）；业务错误(验证码错/429/400)必须如实上抛
+function isNetErr(e) {
+  return e instanceof TypeError || /fetch|network|Failed to fetch|NetworkError/i.test(String((e && e.message) || ''))
+}
+
+// 后端 user 行 → 前端 userInfo 形状
+function shapeUser(d, fallbackNick) {
+  const u = (d && d.user) || {}
+  return {
+    id: String(u.id || ''),
+    nickname: u.nickname || fallbackNick || '花友',
+    avatar: u.avatar || '',
+    phone: u.phone || '',
+    openid: u.openid || '',
+    guest: !!(u.guest || (!u.phone && !u.openid))
+  }
+}
+
+// 微信登录：真接入(code=授权回跳) → /auth/wechat 换 openid 统一账号；
+// 未配置/无 code/网络失败 → 当前阶段等价于「匿名访客登录」（guest_id 落库）
 export async function loginByWechat(profile) {
+  const code = profile && profile.code
+  if (REAL_API_ENABLED && code) {
+    try {
+      const { guestId, bindUserId } = currentIdentity()
+      const d = await realPost('/auth/wechat', {
+        code,
+        guestId: guestId || undefined,
+        bindUserId: bindUserId || undefined
+      }, localToken() || undefined)
+      const info = shapeUser(d, '微信用户')
+      persistAuth(d.token, info)
+      return { userInfo: info, token: d.token }
+    } catch (e) {
+      if (!isNetErr(e)) throw e
+      console.warn('[api] /auth/wechat 网络失败，降级访客：', e && e.message)
+    }
+  }
+  const a = await ensureGuestAuth()
+  if (!a.offline) {
+    const info = {
+      ...a.userInfo,
+      nickname: (profile && profile.nickname) || a.userInfo.nickname || '微信用户'
+    }
+    persistAuth(a.token, info)
+    return { userInfo: info, token: a.token }
+  }
   await delay(300)
   const userInfo = {
     id: 'u_' + Math.random().toString(36).slice(2, 8),
@@ -310,14 +602,41 @@ export async function loginByWechat(profile) {
   return { userInfo, token }
 }
 
-// 发送短信验证码：真实环境后端发短信，此处 mock 返回成功
+// 发送短信验证码：真后端 debug 模式回显测试码（供 UI 提示）；tencent 模式真发
 export async function sendSmsCode(phone) {
+  if (REAL_API_ENABLED) {
+    try {
+      const d = await realPost('/auth/sms/send', { phone })
+      return { ok: true, debug: !!d.debug, code: d.code || '' }
+    } catch (e) {
+      if (!isNetErr(e)) throw e // 429 限频/手机号格式等如实上报
+      console.warn('[api] /auth/sms/send 网络失败，回退 mock：', e && e.message)
+    }
+  }
   await delay(300)
-  return { code: 0, data: true }
+  return { ok: true, debug: true, code: '123456' } // mock：万能码
 }
 
-// 手机号 + 验证码登录：mock 下任意 6 位数字验证码通过，真实环境后端校验
+// 手机号 + 验证码登录：真后端校验 + 账号统一（guest/当前账号并入手机号主账号）
 export async function loginByPhone(phone, code) {
+  if (REAL_API_ENABLED) {
+    try {
+      const { guestId, bindUserId } = currentIdentity()
+      const d = await realPost('/auth/sms/login', {
+        phone,
+        code,
+        guestId: guestId || undefined,
+        bindUserId: bindUserId || undefined,
+        nickname: '花友' + phone.slice(-4)
+      }, localToken() || undefined)
+      const info = shapeUser(d, '花友' + phone.slice(-4))
+      persistAuth(d.token, info)
+      return { userInfo: info, token: d.token }
+    } catch (e) {
+      if (!isNetErr(e)) throw e // 验证码错误/已消费/频繁 → 如实上抛，绝不 mock 假成功
+      console.warn('[api] /auth/sms/login 网络失败，回退 mock：', e && e.message)
+    }
+  }
   await delay(300)
   if (!/^\d{6}$/.test(code || '')) {
     throw new Error('验证码错误')

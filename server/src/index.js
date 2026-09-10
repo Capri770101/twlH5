@@ -3,16 +3,28 @@
 import express from 'express'
 import cors from 'cors'
 import { query, getColumns } from './db.js'
+import { h5DbHealth } from './h5db.js'
 import { mapFlowerRow, mapShopRow, prepareShopTrustInfo, mapReviewRow, mapUserRow } from './mapping.js'
+import {
+  toFlower, toShop, isOnSale,
+  storeHome, storeCategories, storeAllFlowers, storeFlowerById, storeAllShops, storeShopFull, storeHealth
+} from './store.js'
+import payRouter, { handleNotify } from './pay.js'
+import ordersRouter from './orders.js'
+import authRouter from './auth.js'
 
 const app = express()
 app.use(cors())
 app.use(express.json())
 
+// 读数据源：api=同事业务 API（默认，推荐）/ mysql=直连 flower_shop（旧方案，白名单已不会开）
+const READ_SOURCE = (process.env.READ_SOURCE || 'api').toLowerCase() === 'mysql' ? 'mysql' : 'api'
+
 // 表名映射：真实表名不同就在 .env 里改（TBL_FLOWERS 等）
 const T = {
   flowers: process.env.TBL_FLOWERS || 'flowers',
   shops: process.env.TBL_SHOPS || 'shops',
+  shopProducts: process.env.TBL_SHOP_PRODUCTS || 'shop_products',
   categories: process.env.TBL_CATEGORIES || 'categories',
   reviews: process.env.TBL_REVIEWS || 'reviews',
   orders: process.env.TBL_ORDERS || 'orders',
@@ -45,16 +57,92 @@ function fail(res, e) {
   res.json({ error: String((e && e.message) || e) })
 }
 
-app.get('/api/health', async (req, res) => {
-  let dbConnected = false
-  let dbError = null
-  try {
-    await query('SELECT 1')
-    dbConnected = true
-  } catch (e) {
-    dbError = String((e && e.message) || e)
+// 商品详情衍生字段（DB / API 两数据源共用，与前端 getFlowerDetail 形状对齐）
+function enrichDetail(f) {
+  const price = f.price || 0
+  const originalPrice = f.originalPrice || 0
+  const hasDiscount = originalPrice > price
+  const discountRate = hasDiscount ? (Math.round((price / originalPrice) * 100) / 10).toFixed(1) : '0'
+  return {
+    ...f,
+    hasDiscount,
+    discountRate,
+    displayTags: f.tags || [],
+    materialItems: f.flowers || [],
+    sceneItems: f.tags || [],
+    meaningText: f.flowerMeaning || '',
+    descriptionText: f.description || '',
+    serviceItems: ['坏单包退', '缺枝补发', '准时送达', '花材新鲜'],
+    deliveryText: '同城配送'
   }
-  res.json({ ok: true, dbConnected, dbError, tables: T, priceUnit: process.env.DB_PRICE_UNIT || 'yuan' })
+}
+
+// 商品排序（API 源本地执行；价格=分）
+function sortFlowers(list, sort) {
+  const arr = [...list]
+  if (sort === 'price_asc') arr.sort((a, b) => a.price - b.price)
+  else if (sort === 'price_desc') arr.sort((a, b) => b.price - a.price)
+  else if (sort === 'sales') arr.sort((a, b) => (b.sales || 0) - (a.sales || 0))
+  else arr.sort((a, b) => (b.sales || 0) - (a.sales || 0))
+  return arr
+}
+
+// 店内商品多策略拉取（真实库 flower_shop 只有 products/shops/shop_products，关联在 shop_products）
+// 依次尝试：① shop_products JOIN products（真实库） → ② products.owner_shop_id → ③ shops.flowers 老模型 id 列表
+async function queryShopFlowers(shopId, shopFlowerIds = []) {
+  // ① 真实库：shop_products(shop_id, product_id, sort_order) JOIN products
+  try {
+    const rows = await query(
+      `SELECT p.* FROM \`${T.shopProducts}\` sp
+       JOIN \`${T.flowers}\` p ON p.id = sp.product_id
+       WHERE sp.shop_id = ?
+       ORDER BY sp.sort_order ASC, sp.id ASC
+       LIMIT 200`,
+      [shopId]
+    )
+    if (rows.length) return rows
+  } catch (e) {
+    console.warn('[api] shop_products JOIN 不可用（退化），', e.message)
+  }
+  // ② products.owner_shop_id 直接归属
+  try {
+    const rows = await query(`SELECT * FROM \`${T.flowers}\` WHERE owner_shop_id = ? LIMIT 200`, [shopId])
+    if (rows.length) return rows
+  } catch (e) {
+    console.warn('[api] owner_shop_id 查询不可用（退化），', e.message)
+  }
+  // ③ 老模型：shops.flowers 列里的 id 列表
+  const ids = (shopFlowerIds || []).filter(Boolean)
+  if (ids.length) {
+    try {
+      const ph = ids.map(() => '?').join(',')
+      const rows = await query(`SELECT * FROM \`${T.flowers}\` WHERE id IN (${ph})`, ids)
+      if (rows.length) return rows
+    } catch (e) {
+      console.warn('[api] shops.flowers 老模型查询不可用，', e.message)
+    }
+  }
+  return []
+}
+
+app.get('/api/health', async (req, res) => {
+  // 三路并行探测：flower_shop（旧只读库，已不用但保留状态）/ h5_shop（订单库）/ 业务 API（当前读源）
+  const [db, h5, storeR] = await Promise.allSettled([
+    query('SELECT 1').then(() => true),
+    h5DbHealth().then(() => true),
+    storeHealth().then(() => true)
+  ])
+  res.json({
+    ok: true,
+    readSource: READ_SOURCE,
+    dbConnected: db.status === 'fulfilled',
+    dbError: db.status === 'fulfilled' ? null : String(db.reason && db.reason.message || db.reason),
+    h5Connected: h5.status === 'fulfilled',
+    h5Error: h5.status === 'fulfilled' ? null : String(h5.reason && h5.reason.message || h5.reason),
+    storeOk: storeR.status === 'fulfilled',
+    storeError: storeR.status === 'fulfilled' ? null : String(storeR.reason && storeR.reason.message || storeR.reason),
+    tables: T, priceUnit: process.env.DB_PRICE_UNIT || 'cents'
+  })
 })
 
 // schema 发现：在白名单 IP 的机器上运行后，把结果贴给前端即可精确对齐列
@@ -79,6 +167,15 @@ app.get('/api/meta/columns', async (req, res) => {
 })
 
 app.get('/api/categories', async (req, res) => {
+  if (READ_SOURCE === 'api') {
+    try {
+      const rows = await storeCategories()
+      res.json(rows.length ? rows : DEFAULT_CATEGORIES)
+    } catch (e) {
+      fail(res, e)
+    }
+    return
+  }
   try {
     let rows = []
     try {
@@ -94,6 +191,28 @@ app.get('/api/categories', async (req, res) => {
 })
 
 app.get('/api/home', async (req, res) => {
+  if (READ_SOURCE === 'api') {
+    try {
+      const h = await storeHome()
+      const banners = (h.banners || []).map((b, i) => ({
+        id: String(b.id || 'b' + (i + 1)),
+        title: String(b.title || ''),
+        subtitle: String(b.subtitle || ''),
+        desc: String(b.desc || ''),
+        link: String(b.link || ''),
+        color: String(b.color || '#E8615D'),
+        image: String(b.image || ''),
+        shopId: String(b.shopId || '')
+      }))
+      const categories = (h.categories || []).length ? h.categories : DEFAULT_CATEGORIES
+      const recommendFlowers = (h.recommendFlowers || []).filter(isOnSale).map((p, i) => toFlower(p, { index: i }))
+      const nearbyShops = (h.nearbyShops || []).map(s => toShop(s))
+      res.json({ banners, categories, recommendFlowers, nearbyShops })
+    } catch (e) {
+      fail(res, e)
+    }
+    return
+  }
   try {
     const fRows = await query(`SELECT * FROM \`${T.flowers}\` ORDER BY sales DESC LIMIT 6`)
     const sRows = await query(`SELECT * FROM \`${T.shops}\` LIMIT 4`)
@@ -120,6 +239,21 @@ app.get('/api/home', async (req, res) => {
 })
 
 app.get('/api/flowers', async (req, res) => {
+  if (READ_SOURCE === 'api') {
+    try {
+      const { categoryId = '', sort = 'default', page = '1', pageSize = '10' } = req.query
+      const all = (await storeAllFlowers()).filter(isOnSale)
+      const arr = categoryId ? all.filter(p => String(p.categoryId || '') === String(categoryId)) : all
+      const total = arr.length
+      const p = Math.max(1, parseInt(page) || 1)
+      const ps = Math.max(1, parseInt(pageSize) || 10)
+      const rows = sortFlowers(arr, sort).slice((p - 1) * ps, (p - 1) * ps + ps)
+      res.json({ list: rows.map(r => toFlower(r)), total, hasMore: (p - 1) * ps + rows.length < total })
+    } catch (e) {
+      fail(res, e)
+    }
+    return
+  }
   try {
     const { categoryId = '', sort = 'default', page = '1', pageSize = '10' } = req.query
     const where = []
@@ -148,48 +282,78 @@ app.get('/api/flowers', async (req, res) => {
 })
 
 app.get('/api/flowers/:id', async (req, res) => {
+  if (READ_SOURCE === 'api') {
+    try {
+      const flower = await storeFlowerById(req.params.id)
+      res.json(enrichDetail(toFlower(flower)))
+    } catch (e) {
+      fail(res, e)
+    }
+    return
+  }
   try {
     const rows = await query(`SELECT * FROM \`${T.flowers}\` WHERE id = ?`, [req.params.id])
     if (!rows.length) return res.json({ error: 'not found' })
-    const f = mapFlowerRow(rows[0])
-    const price = f.price || 0
-    const originalPrice = f.originalPrice || 0
-    const hasDiscount = originalPrice > price
-    const discountRate = hasDiscount ? (Math.round((price / originalPrice) * 100) / 10).toFixed(1) : '0'
-    res.json({
-      ...f,
-      hasDiscount,
-      discountRate,
-      displayTags: f.tags || [],
-      materialItems: f.flowers || [],
-      sceneItems: f.tags || [],
-      meaningText: f.flowerMeaning || '',
-      descriptionText: f.description || '',
-      serviceItems: ['坏单包退', '缺枝补发', '准时送达', '花材新鲜'],
-      deliveryText: '同城配送'
-    })
+    res.json(enrichDetail(mapFlowerRow(rows[0])))
+  } catch (e) {
+    fail(res, e)
+  }
+})
+
+// 门店列表（首页「更多花店」；仅 API 源提供，DB 源无独立列表路由时同返空）
+app.get('/api/shops', async (req, res) => {
+  if (READ_SOURCE === 'api') {
+    try {
+      const list = (await storeAllShops()).map(s => toShop(s))
+      res.json(list)
+    } catch (e) {
+      fail(res, e)
+    }
+    return
+  }
+  try {
+    const sRows = await query(`SELECT * FROM \`${T.shops}\` LIMIT 100`)
+    res.json(sRows.map(s => mapShopRow(s)))
   } catch (e) {
     fail(res, e)
   }
 })
 
 app.get('/api/shops/:id', async (req, res) => {
+  if (READ_SOURCE === 'api') {
+    try {
+      const d = await storeShopFull(req.params.id)
+      const shop = prepareShopTrustInfo(toShop(d.shop))
+      // 店内目录按 shop.flowers 展示序排；仅展示上架，全下架时兜底全量防空页
+      const orderMap = new Map((d.shop.flowers || []).map((fid, i) => [String(fid), i]))
+      const rank = (a, b) => (orderMap.has(String(a.id)) ? orderMap.get(String(a.id)) : 1e9) - (orderMap.has(String(b.id)) ? orderMap.get(String(b.id)) : 1e9)
+      let flowers = (d.products || []).filter(isOnSale).sort(rank).map(p => toFlower(p))
+      if (!flowers.length) flowers = (d.products || []).map(p => toFlower(p))
+      const featured = flowers.slice(0, 3)
+      const catName = new Map((d.categories || []).map(c => [String(c.id), String(c.name || c.id)]))
+      const catMap = new Map()
+      flowers.forEach(f => {
+        const cid = String(f.categoryId || 'other')
+        if (!catMap.has(cid)) catMap.set(cid, { id: cid, name: catName.get(cid) || cid })
+      })
+      const categories = [{ id: '', name: '全部' }, ...Array.from(catMap.values())]
+      res.json({ shop, flowers, featured, categories })
+    } catch (e) {
+      fail(res, e)
+    }
+    return
+  }
   try {
     const rows = await query(`SELECT * FROM \`${T.shops}\` WHERE id = ?`, [req.params.id])
     if (!rows.length) return res.json({ error: 'not found' })
-    const shop = prepareShopTrustInfo(mapShopRow(rows[0]))
-    const ids = shop.flowers || []
-    let allFlowers = []
-    if (ids.length) {
-      const ph = ids.map(() => '?').join(',')
-      const fRows = await query(`SELECT * FROM \`${T.flowers}\` WHERE id IN (${ph})`, ids)
-      allFlowers = fRows.map(r => mapFlowerRow(r))
-    }
-    if (!allFlowers.length && shop.categoryId) {
+    const rawShop = mapShopRow(rows[0])
+    const shop = prepareShopTrustInfo(rawShop)
+    // 店内商品：真实库走 shop_products JOIN products，自动退化兼容老模型
+    let flowers = (await queryShopFlowers(shop.id, rawShop.flowers)).map(r => mapFlowerRow(r))
+    if (!flowers.length && shop.categoryId) {
       const fRows = await query(`SELECT * FROM \`${T.flowers}\` WHERE category_id = ? LIMIT 12`, [shop.categoryId])
-      allFlowers = fRows.map(r => mapFlowerRow(r))
+      flowers = fRows.map(r => mapFlowerRow(r))
     }
-    const flowers = allFlowers
     const featured = flowers.slice(0, 3)
     const catMap = new Map()
     flowers.forEach(f => {
@@ -204,6 +368,8 @@ app.get('/api/shops/:id', async (req, res) => {
 })
 
 app.get('/api/shops/:id/reviews', async (req, res) => {
+  // API 源暂无评价端点：快速返回空（前端按空态处理），不等待 MySQL 超时
+  if (READ_SOURCE === 'api') return res.json([])
   try {
     let rows = []
     try {
@@ -242,9 +408,27 @@ app.get('/api/users', async (req, res) => {
 })
 
 app.get('/api/search', async (req, res) => {
+  const q = (req.query.q || '').trim()
+  if (!q) return res.json({ flowers: [], shops: [] })
+  if (READ_SOURCE === 'api') {
+    try {
+      const kw = q.toLowerCase()
+      const hit = (s) => s && String(s).toLowerCase().includes(kw)
+      const fAll = (await storeAllFlowers()).filter(isOnSale)
+      const fRows = fAll.filter(p =>
+        hit(p.name) || hit(p.subtitle) || hit(p.shopName) ||
+        (Array.isArray(p.tags) && p.tags.some(hit)) ||
+        (Array.isArray(p.flowers) && p.flowers.some(hit))
+      ).slice(0, 20)
+      const sAll = await storeAllShops()
+      const sRows = sAll.filter(s => hit(s.name) || hit(s.address) || hit(s.ipText)).slice(0, 20)
+      res.json({ flowers: fRows.map(r => toFlower(r)), shops: sRows.map(s => toShop(s)) })
+    } catch (e) {
+      fail(res, e)
+    }
+    return
+  }
   try {
-    const q = (req.query.q || '').trim()
-    if (!q) return res.json({ flowers: [], shops: [] })
     const like = `%${q}%`
     const fRows = await query(
       `SELECT * FROM \`${T.flowers}\` WHERE name LIKE ? OR subtitle LIKE ? OR tags LIKE ? LIMIT 20`,
@@ -259,6 +443,19 @@ app.get('/api/search', async (req, res) => {
     fail(res, e)
   }
 })
+
+// ---------- 微信支付（服务商 + 分账） ----------
+app.use('/api/pay', payRouter)
+// 回调需原始 body 验签
+app.post('/api/pay/notify', express.raw({ type: 'application/json' }), async (req, res) => {
+  const raw = req.body && Buffer.isBuffer(req.body) ? req.body.toString('utf8') : ''
+  const result = await handleNotify(raw, req.headers)
+  res.status(result.status).json(result.json)
+})
+
+// ---------- H5 业务：订单读写 + 用户身份（h5_shop 库） ----------
+app.use('/api/orders', ordersRouter)
+app.use('/api/auth', authRouter)
 
 const PORT = Number(process.env.API_PORT || 4000)
 app.listen(PORT, () => {

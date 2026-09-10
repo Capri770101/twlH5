@@ -47,14 +47,15 @@
         </div>
 
         <div v-if="order.status === 'new'" class="order-actions">
-          <button class="btn btn-outline btn-sm" @click.stop="toast('已取消')">取消订单</button>
-          <button class="btn btn-primary btn-sm" @click.stop="toast('支付功能开发中')">去支付</button>
+          <button class="btn btn-outline btn-sm" @click.stop="onCancel(order)">取消订单</button>
+          <button class="btn btn-primary btn-sm" @click.stop="onPay(order)">去支付</button>
         </div>
         <div v-else-if="order.status === 'completed'" class="order-actions">
           <button v-if="!order._hasReview" class="btn btn-outline btn-sm" @click.stop="toast('评价页开发中')">去评价</button>
           <button class="btn btn-primary btn-sm" @click.stop="repeatOrder(order)">再来一单</button>
         </div>
         <div v-else-if="!['refunding', 'refunded', 'refund_failed', 'cancelled'].includes(order.status)" class="order-actions">
+          <button v-if="order._canRefund" class="btn btn-outline btn-sm" @click.stop="openRefund(order)">申请退款</button>
           <button class="btn btn-primary btn-sm" @click.stop="repeatOrder(order)">再来一单</button>
         </div>
         <div v-if="order.status === 'refunding'" class="order-actions">
@@ -76,16 +77,20 @@
     </div>
 
     <div v-if="toastText" class="twd-toast">{{ toastText }}</div>
+
+    <RefundDialog v-model:visible="showRefund" :order="refundTarget" @success="onRefundSuccess" @error="toast" />
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getOrderList } from '@/mock/api'
+import { getOrderList, cancelOrder, payOrder } from '@/mock/api'
 import { money, addToCart } from '@/store'
+import { isWeChat, invokeWxPay } from '@/utils/wxpay'
 import NavBar from '@/components/NavBar.vue'
 import FlowerImage from '@/components/FlowerImage.vue'
+import RefundDialog from '@/components/RefundDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -138,12 +143,65 @@ function repeatOrder(order) {
   setTimeout(() => router.push({ name: 'cart' }), 300)
 }
 
+// 待付款订单：取消（真实后端落库）
+async function onCancel(order) {
+  if (!order) return
+  try {
+    await cancelOrder(order.id)
+    toast('已取消')
+    load()
+  } catch (e) {
+    toast((e && e.message) || '取消失败')
+  }
+}
+
+// 待付款订单：重新拉起支付（微信内 JSAPI / 外部浏览器跳 H5 收银台）
+async function onPay(order) {
+  if (!order) return
+  const openid = ''
+  const tradeType = isWeChat() ? 'JSAPI' : 'H5'
+  try {
+    const pay = await payOrder({
+      shopId: order.shopId || 'default',
+      outTradeNo: order.id,
+      amountFen: order.totalPrice || 0,
+      description: '跳舞兰AI花店订单',
+      openid,
+      tradeType
+    })
+    if (pay.tradeType === 'H5' && pay.h5_url) {
+      location.href = pay.h5_url
+      return
+    }
+    if (pay.tradeType === 'JSAPI') {
+      await invokeWxPay(pay)
+      router.replace({ name: 'order-detail', params: { id: order.id } })
+      return
+    }
+    toast('支付暂不可用，请稍后重试')
+  } catch (e) {
+    toast('支付未完成，可稍后重试')
+  }
+}
+
 const toastText = ref('')
 let toastTimer = null
 function toast(text) {
   toastText.value = text
   clearTimeout(toastTimer)
   toastTimer = setTimeout(() => { toastText.value = '' }, 1600)
+}
+
+const showRefund = ref(false)
+const refundTarget = ref(null)
+function openRefund(order) {
+  refundTarget.value = order
+  showRefund.value = true
+}
+function onRefundSuccess() {
+  if (refundTarget.value) refundTarget.value.status = 'refunding'
+  showRefund.value = false
+  toast('已提交退款申请，商家处理中')
 }
 
 onMounted(load)

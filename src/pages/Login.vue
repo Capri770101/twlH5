@@ -57,7 +57,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import NavBar from '@/components/NavBar.vue'
 import { login } from '@/store'
@@ -93,8 +93,8 @@ function onSendCode() {
   if (!phoneValid.value) { toast('请输入正确的手机号'); return }
   sending.value = true
   countdown.value = 60
-  sendSmsCode(phone.value).then(() => {
-    toast('验证码已发送（mock：任意 6 位数字即可）')
+  sendSmsCode(phone.value).then(r => {
+    toast(r && r.debug && r.code ? `验证码已发送（测试码：${r.code}）` : '验证码已发送')
     timer = setInterval(() => {
       countdown.value -= 1
       if (countdown.value <= 0) {
@@ -155,6 +155,23 @@ function openAgreement(type) {
 const showAgreement = ref(false)
 const agreementTitle = ref('')
 const agreementText = ref('')
+
+// 微信网页授权回跳：?code=xxx&state=twd → 自动用 code 登录（后端 code2session 换 openid）
+async function wechatLoginByCode(code) {
+  try {
+    const clean = location.href.split('?')[0] + (location.search.replace(/[?&](code|state)=[^&]*/g, '').replace(/^&/, '?'))
+    history.replaceState(null, '', clean)
+    const { userInfo, token } = await loginByWechat({ code })
+    finishLogin(userInfo, token)
+  } catch (e) {
+    toast(e.message || '微信登录失败，请重试')
+  }
+}
+
+onMounted(() => {
+  const q = route.query
+  if (q.code && q.state === 'twd') wechatLoginByCode(String(q.code))
+})
 
 onUnmounted(() => {
   if (timer) clearInterval(timer)

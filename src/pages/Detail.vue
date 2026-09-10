@@ -20,6 +20,8 @@
         <div class="detail-tags">
           <span v-for="tag in flower.displayTags" :key="tag" class="tag tag-primary">{{ tag }}</span>
         </div>
+        <button class="detail-fav-btn" :class="{ active: favorited }" @click.stop="onToggleFav">{{ favorited ? '♥' : '♡' }}</button>
+        <button class="detail-poster-btn" @click="onShowPoster">🖼️</button>
         <button class="detail-share-btn" @click="onShare">↗</button>
       </div>
 
@@ -140,6 +142,7 @@
     </template>
 
     <div v-if="toastText" class="twd-toast">{{ toastText }}</div>
+    <SharePoster v-if="showPoster" :product="flower" @close="showPoster = false" />
   </div>
 </template>
 
@@ -147,9 +150,10 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getFlowerDetail } from '@/mock/api'
-import { addToCart, cartCount, money } from '@/store'
+import { addToCart, cartCount, money, toggleFavorite, isFavorite } from '@/store'
 import NavBar from '@/components/NavBar.vue'
 import FlowerImage from '@/components/FlowerImage.vue'
+import SharePoster from '@/components/SharePoster.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -164,6 +168,13 @@ function toast(text) {
   toastText.value = text
   clearTimeout(toastTimer)
   toastTimer = setTimeout(() => { toastText.value = '' }, 1600)
+}
+
+const favorited = computed(() => flower.value && isFavorite(flower.value.id))
+function onToggleFav() {
+  if (!flower.value) return
+  const now = toggleFavorite(flower.value)
+  toast(now ? '已收藏 ❤️' : '已取消收藏')
 }
 
 const heroEmoji = computed(() => {
@@ -197,6 +208,11 @@ function onShare() {
   } else {
     toast('分享链接：' + url)
   }
+}
+
+const showPoster = ref(false)
+function onShowPoster() {
+  if (flower.value) showPoster.value = true
 }
 
 onMounted(async () => {
@@ -250,7 +266,7 @@ onUnmounted(() => clearTimeout(toastTimer))
   display: flex;
   flex-wrap: wrap;
   gap: rpx(8);
-  right: rpx(110);
+  right: rpx(200);
 }
 .detail-share-btn {
   position: absolute;
@@ -269,6 +285,44 @@ onUnmounted(() => clearTimeout(toastTimer))
   border: none;
   padding: 0;
   box-shadow: 0 rpx(8) rpx(24) rgba(0, 0, 0, 0.12);
+}
+.detail-poster-btn {
+  position: absolute;
+  top: rpx(110);
+  right: rpx(24);
+  width: rpx(72);
+  height: rpx(72);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #251f1c;
+  font-size: rpx(34);
+  line-height: 1;
+  border: none;
+  padding: 0;
+  box-shadow: 0 rpx(8) rpx(24) rgba(0, 0, 0, 0.12);
+}
+.detail-fav-btn {
+  position: absolute;
+  top: rpx(24);
+  right: rpx(110);
+  width: rpx(72);
+  height: rpx(72);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #bbb;
+  font-size: rpx(42);
+  line-height: 1;
+  border: none;
+  padding: 0;
+  box-shadow: 0 rpx(8) rpx(24) rgba(0, 0, 0, 0.12);
+  z-index: 3;
+  &.active { color: #FF4D4F; }
 }
 
 /* ===== 分区 ===== */

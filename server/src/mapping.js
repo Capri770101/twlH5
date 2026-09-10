@@ -14,15 +14,20 @@ function toStr(v) {
   return v == null ? '' : String(v)
 }
 
+// 数组元素归一：字符串/数字转字符串；对象保留原样（如 flowers 花材清单可能是 [{name,count}]）
+function normItem(x) {
+  return typeof x === 'string' || typeof x === 'number' ? String(x) : x
+}
+
 function parseJsonOrArray(v) {
-  if (Array.isArray(v)) return v.map(toStr)
+  if (Array.isArray(v)) return v.map(normItem)
   if (typeof v === 'string') {
     const s = v.trim()
     if (!s) return []
     if (s.startsWith('[')) {
       try {
         const a = JSON.parse(s)
-        return Array.isArray(a) ? a.map(toStr) : [s]
+        return Array.isArray(a) ? a.map(normItem) : [s]
       } catch (e) {
         return [s]
       }
@@ -41,7 +46,9 @@ function priceCents(v, unit) {
 }
 
 function priceUnit() {
-  return (process.env.DB_PRICE_UNIT || 'yuan').toLowerCase()
+  // 真实 flower_shop 库与 aistore 业务 API 均以「分」存价 → 缺省 cents；
+  // 仅历史 mock 型库（存元）才需显式设 DB_PRICE_UNIT=yuan。
+  return (process.env.DB_PRICE_UNIT || 'cents').toLowerCase()
 }
 
 /** 花束行 → 前端花束卡片/详情形状（对齐 mock enrichFlowerItem） */
