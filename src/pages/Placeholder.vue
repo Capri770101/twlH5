@@ -59,10 +59,6 @@
         <span class="m-left">❤️ 我的收藏</span>
         <span class="m-arrow">›</span>
       </li>
-      <li @click="router.push({ name: 'my-plans' })">
-        <span class="m-left">💐 我的方案</span>
-        <span class="m-arrow">›</span>
-      </li>
       <li @click="router.push({ name: 'my-coupons' })">
         <span class="m-left">🎫 我的优惠券</span>
         <span class="m-arrow">›</span>
@@ -78,9 +74,6 @@
     </ul>
 
     <button v-if="store.isLogged" class="logout-btn" @click="onLogout">退出登录</button>
-
-    <!-- 固定 TabBar 占位（防止退出登录按钮被底部导航挡住） -->
-    <div class="tabbar-placeholder"></div>
 
     <AddressManager v-model="visibleAddr" />
 
@@ -269,12 +262,6 @@ function toast(text) {
   font-size: rpx(30);
   font-weight: 600;
   box-shadow: var(--shadow-sm);
-}
-
-/* 固定 TabBar 占位（TabBar 高 100rpx + 底部安全区） */
-.tabbar-placeholder {
-  height: calc(#{rpx(120)} + constant(safe-area-inset-bottom));
-  height: calc(#{rpx(120)} + env(safe-area-inset-bottom));
 }
 
 .twd-toast {

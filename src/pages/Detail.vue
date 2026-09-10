@@ -33,36 +33,15 @@
         </div>
         <div class="detail-price-row">
           <div class="detail-price">
-            <span class="price price-lg">{{ money(currentPrice) }}</span>
-            <span v-if="hasDiscount" class="price-original price-md">{{ money(currentOriginalPrice) }}</span>
-            <span v-if="hasDiscount" class="detail-discount">{{ discountRate }}折</span>
+            <span class="price price-lg">{{ money(flower.price) }}</span>
+            <span v-if="flower.hasDiscount" class="price-original price-md">{{ money(flower.originalPrice) }}</span>
+            <span v-if="flower.hasDiscount" class="detail-discount">{{ flower.discountRate }}折</span>
           </div>
           <div class="detail-meta">
             <span v-if="flower.sales > 0" class="detail-sales">已售{{ flower.sales }}</span>
             <span v-else class="detail-sales">今日多人浏览</span>
             <span class="detail-stock">库存{{ flower.stock }}</span>
           </div>
-        </div>
-      </div>
-
-      <!-- 规格选择 -->
-      <div v-if="specs.length > 1" class="detail-section detail-spec-section">
-        <div class="section-label">
-          选择规格
-          <span v-if="activeSpec" class="spec-selected">已选：{{ activeSpec.name }}</span>
-        </div>
-        <div class="spec-list">
-          <button
-            v-for="sp in specs"
-            :key="sp.id"
-            class="spec-chip"
-            :class="{ active: sp.id === selectedSpecId }"
-            @click="selectedSpecId = sp.id"
-          >
-            <span class="spec-name">{{ sp.name }}</span>
-            <span class="spec-desc">{{ sp.desc }}</span>
-            <span class="spec-price price">{{ money(sp.price) }}</span>
-          </button>
         </div>
       </div>
 
@@ -136,33 +115,6 @@
         </div>
       </div>
 
-      <!-- 买家评价 -->
-      <div class="detail-section review-section">
-        <div class="review-head">
-          <span class="section-label">买家评价（{{ reviews.length }}）</span>
-          <div class="review-score">
-            <span class="review-score-num">{{ reviewAvg }}</span>
-            <span class="review-score-star">★</span>
-          </div>
-        </div>
-        <div v-if="reviews.length" class="review-list">
-          <div v-for="(rv, i) in reviews.slice(0, 5)" :key="i" class="review-item">
-            <div class="review-item-head">
-              <span class="review-user" :class="{ mine: rv.mine }">{{ rv.user }}</span>
-              <span class="review-date">{{ rv.date }}</span>
-            </div>
-            <div class="review-stars">
-              <span v-for="n in 5" :key="n" class="rs" :class="{ on: n <= rv.rating }">★</span>
-            </div>
-            <span class="review-text">{{ rv.content }}</span>
-            <div v-if="rv.tags && rv.tags.length" class="review-tag-row">
-              <span v-for="t in rv.tags" :key="t">{{ t }}</span>
-            </div>
-          </div>
-        </div>
-        <div v-else class="review-empty">还没有评价，等你来分享第一束花</div>
-      </div>
-
       <div class="footer-placeholder"></div>
 
       <!-- 底部操作栏 -->
@@ -195,11 +147,10 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getFlowerDetail, getProductReviews } from '@/mock/api'
+import { getFlowerDetail } from '@/mock/api'
 import { addToCart, cartCount, money, toggleFavorite, isFavorite } from '@/store'
-import { deriveSpecs, defaultSpec } from '@/utils/specs'
 import NavBar from '@/components/NavBar.vue'
 import FlowerImage from '@/components/FlowerImage.vue'
 import SharePoster from '@/components/SharePoster.vue'
@@ -234,60 +185,14 @@ const heroEmoji = computed(() => {
   return (flower.value && map[flower.value.categoryId]) || '\u{1F337}'
 })
 
-/* ===== 规格 ===== */
-const specs = computed(() => deriveSpecs(flower.value))
-const selectedSpecId = ref('')
-
-watch(specs, list => {
-  if (!list.length) { selectedSpecId.value = ''; return }
-  if (!list.some(s => s.id === selectedSpecId.value)) {
-    selectedSpecId.value = (defaultSpec(list) || {}).id || ''
-  }
-}, { immediate: true })
-
-const activeSpec = computed(() =>
-  specs.value.find(s => s.id === selectedSpecId.value) || defaultSpec(specs.value)
-)
-
-const currentPrice = computed(() => {
-  if (activeSpec.value) return activeSpec.value.price
-  return (flower.value && flower.value.price) || 0
-})
-const currentOriginalPrice = computed(() => {
-  if (activeSpec.value && activeSpec.value.originalPrice) return activeSpec.value.originalPrice
-  return (flower.value && flower.value.originalPrice) || 0
-})
-const hasDiscount = computed(() => currentOriginalPrice.value > currentPrice.value)
-const discountRate = computed(() => {
-  if (!hasDiscount.value) return '0'
-  return (Math.round((currentPrice.value / currentOriginalPrice.value) * 100) / 10).toFixed(1)
-})
-
-// 把当前商品 + 选中规格组装成购物车条目
-function buildCartItem() {
-  const f = flower.value
-  if (!f) return null
-  const sp = activeSpec.value
-  return {
-    ...f,
-    price: currentPrice.value,
-    originalPrice: currentOriginalPrice.value,
-    specId: sp ? sp.id : '',
-    specName: sp ? sp.name : ''
-  }
-}
-
 function onAddCart() {
-  const item = buildCartItem()
-  if (!item) return
-  addToCart(item, 1)
+  addToCart(flower.value, 1)
   toast('已加入购物车')
 }
 
 function onBuyNow() {
-  const item = buildCartItem()
-  if (!item) return
-  addToCart(item, 1)
+  if (!flower.value) return
+  addToCart(flower.value, 1)
   router.push({ name: 'checkout' })
 }
 
@@ -310,18 +215,9 @@ function onShowPoster() {
   if (flower.value) showPoster.value = true
 }
 
-/* ===== 买家评价 ===== */
-const reviews = ref([])
-const reviewAvg = computed(() => {
-  if (!reviews.value.length) return '暂无'
-  const sum = reviews.value.reduce((s, r) => s + (Number(r.rating) || 0), 0)
-  return (sum / reviews.value.length).toFixed(1)
-})
-
 onMounted(async () => {
   flower.value = await getFlowerDetail(route.params.id)
   loading.value = false
-  getProductReviews(route.params.id).then(list => { reviews.value = list || [] }).catch(() => {})
 })
 
 onUnmounted(() => clearTimeout(toastTimer))
@@ -442,63 +338,6 @@ onUnmounted(() => clearTimeout(toastTimer))
 }
 .detail-scene-section {
   background: #fffdfa;
-}
-
-/* ===== 规格 ===== */
-.detail-spec-section {
-  background: #fff;
-}
-.detail-spec-section .section-label {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: rpx(12);
-}
-.spec-selected {
-  font-size: var(--fs-caption);
-  font-weight: 400;
-  color: var(--primary);
-}
-.spec-list {
-  display: flex;
-  flex-direction: column;
-  gap: rpx(14);
-}
-.spec-chip {
-  display: flex;
-  align-items: center;
-  gap: rpx(12);
-  padding: rpx(18) rpx(22);
-  border: rpx(2) solid #ece7e0;
-  border-radius: var(--radius-sm);
-  background: #faf8f5;
-  text-align: left;
-  transition: all 0.15s;
-}
-.spec-chip.active {
-  border-color: var(--primary);
-  background: var(--primary-light);
-}
-.spec-name {
-  font-size: var(--fs-body);
-  font-weight: 600;
-  color: var(--text-primary);
-  flex-shrink: 0;
-}
-.spec-desc {
-  font-size: var(--fs-caption);
-  color: var(--text-light);
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.spec-price {
-  font-size: rpx(28);
-  font-weight: 700;
-  color: var(--primary);
-  flex-shrink: 0;
 }
 .scene-tags {
   display: flex;
@@ -674,95 +513,6 @@ onUnmounted(() => clearTimeout(toastTimer))
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* ===== 买家评价 ===== */
-.review-section {
-  background: #fff;
-}
-.review-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.review-head .section-label {
-  margin-bottom: 0;
-}
-.review-score {
-  display: flex;
-  align-items: baseline;
-  gap: rpx(4);
-  color: #ffb020;
-}
-.review-score-num {
-  font-size: rpx(34);
-  font-weight: 700;
-}
-.review-score-star {
-  font-size: rpx(26);
-}
-.review-list {
-  margin-top: rpx(8);
-}
-.review-item {
-  padding: rpx(20) 0;
-}
-.review-item + .review-item {
-  border-top: rpx(1) solid var(--border-light);
-}
-.review-item-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.review-user {
-  font-size: var(--fs-minor);
-  color: var(--text-secondary);
-}
-.review-user.mine {
-  color: var(--primary);
-  font-weight: 600;
-}
-.review-date {
-  font-size: var(--fs-caption);
-  color: var(--text-light);
-}
-.review-stars {
-  display: flex;
-  margin-top: rpx(8);
-}
-.review-stars .rs {
-  color: #dadde1;
-  font-size: rpx(24);
-}
-.review-stars .rs.on {
-  color: #ffb020;
-}
-.review-text {
-  display: block;
-  margin-top: rpx(10);
-  font-size: var(--fs-body);
-  color: var(--text-secondary);
-  line-height: 1.65;
-}
-.review-tag-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: rpx(10);
-  margin-top: rpx(12);
-}
-.review-tag-row span {
-  padding: rpx(6) rpx(14);
-  border-radius: rpx(6);
-  background: var(--primary-light);
-  color: var(--primary);
-  font-size: var(--fs-caption);
-}
-.review-empty {
-  padding: rpx(30) 0 rpx(10);
-  text-align: center;
-  font-size: var(--fs-minor);
-  color: var(--text-light);
 }
 
 /* ===== 底部操作栏 ===== */

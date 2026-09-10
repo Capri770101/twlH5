@@ -12,16 +12,15 @@
           </div>
 
           <div class="shop-items">
-            <div v-for="product in group.items" :key="product.id + '|' + (product.specId || '')" class="cart-item">
+            <div v-for="product in group.items" :key="product.id" class="cart-item">
               <div class="cart-img">
                 <FlowerImage :src="product.image" emoji="💐" />
               </div>
 
               <div class="cart-info">
                 <span class="cart-name">{{ product.name }}</span>
-                <div v-if="product.specName || product.subtitle" class="cart-specs">
-                  <span v-if="product.specName" class="cart-spec-chip">{{ product.specName }}</span>
-                  <span v-if="product.subtitle">{{ product.subtitle }}</span>
+                <div v-if="product.subtitle" class="cart-specs">
+                  <span>{{ product.subtitle }}</span>
                 </div>
                 <div class="cart-price-row">
                   <span class="price price-sm">{{ money(product.price) }}</span>
@@ -33,17 +32,17 @@
                   <button
                     class="qty-btn minus"
                     :class="{ disabled: product.quantity <= 1 }"
-                    @click="changeQuantity(product.id, product.shopId, -1, product.specId)"
+                    @click="changeQuantity(product.id, product.shopId, -1)"
                   >−</button>
                   <span class="qty-num">{{ product.quantity }}</span>
                   <button
                     class="qty-btn plus"
-                    @click="changeQuantity(product.id, product.shopId, 1, product.specId)"
+                    @click="changeQuantity(product.id, product.shopId, 1)"
                   >+</button>
                 </div>
               </div>
 
-              <button class="cart-delete" @click="removeFromCart(product.id, product.shopId, product.specId)">
+              <button class="cart-delete" @click="removeFromCart(product.id, product.shopId)">
                 <span>🗑</span>
               </button>
             </div>
@@ -198,21 +197,10 @@ onUnmounted(() => clearTimeout(toastTimer))
   font-size: var(--fs-minor);
   color: #999;
   background: #f5f5f5;
-  display: inline-flex;
-  align-items: center;
-  gap: rpx(8);
+  display: inline-block;
   align-self: flex-start;
   padding: rpx(4) rpx(12);
   border-radius: rpx(4);
-}
-.cart-spec-chip {
-  color: var(--primary);
-  font-weight: 600;
-}
-.cart-spec-chip + span::before {
-  content: '·';
-  margin-right: rpx(8);
-  color: #ccc;
 }
 .cart-price-row {
   display: flex;

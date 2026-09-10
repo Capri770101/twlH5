@@ -9,37 +9,45 @@
     </div>
 
     <div class="form">
-      <div class="field">
-        <span class="field-icon">📱</span>
-        <input class="field-input" type="tel" inputmode="numeric" maxlength="11"
-               v-model="phone" placeholder="请输入手机号" />
-      </div>
+      <!-- ===== 手机号登录（默认视图；PC 点微信登录后被二维码覆盖） ===== -->
+      <template v-if="wechatEnv || pcView === 'phone'">
+        <div class="field">
+          <span class="field-icon">📱</span>
+          <input class="field-input" type="tel" inputmode="numeric" maxlength="11"
+                 v-model="phone" placeholder="请输入手机号" />
+        </div>
 
-      <div class="field">
-        <span class="field-icon">🔑</span>
-        <input class="field-input" type="tel" inputmode="numeric" maxlength="6"
-               v-model="code" placeholder="请输入验证码" />
-        <button class="code-btn" :class="{ disabled: sending }" :disabled="sending" @click="onSendCode">
-          {{ sending ? countdown + 's 后重发' : '获取验证码' }}
+        <div class="field">
+          <span class="field-icon">🔑</span>
+          <input class="field-input" type="tel" inputmode="numeric" maxlength="6"
+                 v-model="code" placeholder="请输入验证码" />
+          <button class="code-btn" :class="{ disabled: sending }" :disabled="sending" @click="onSendCode">
+            {{ sending ? countdown + 's 后重发' : '获取验证码' }}
+          </button>
+        </div>
+
+        <button class="login-btn" :class="{ disabled: !canPhoneLogin }" @click="onPhoneLogin">
+          手机号验证码登录
         </button>
-      </div>
 
-      <button class="login-btn" :class="{ disabled: !canPhoneLogin }" @click="onPhoneLogin">
-        手机号验证码登录
-      </button>
+        <div class="divider"><span>或</span></div>
 
-      <div class="divider"><span>或</span></div>
+        <!-- 微信内：一键授权（snsapi_userinfo 完整授权） -->
+        <template v-if="wechatEnv">
+          <button class="login-btn wechat" :class="{ disabled: !agreed }" @click="onWechatLogin">
+            <span class="wb-icon">💬</span> 微信一键登录
+          </button>
+          <p class="env-tip">检测到微信环境，将使用微信授权登录</p>
+        </template>
 
-      <!-- 微信内：一键授权按钮（snsapi_userinfo 完整授权） -->
-      <template v-if="wechatEnv">
-        <button class="login-btn wechat" :class="{ disabled: !agreed }" @click="onWechatLogin">
-          <span class="wb-icon">💬</span> 微信一键登录
+        <!-- PC / 外部浏览器：点这里才切到二维码，并覆盖上方手机号表单 -->
+        <button v-else class="login-btn wechat" @click="showPcQrView">
+          <span class="wb-icon">💬</span> 微信扫码登录
         </button>
-        <p class="env-tip">检测到微信环境，将使用微信授权登录</p>
       </template>
 
-      <!-- PC / 外部浏览器：二维码内嵌登录框（方案 B 扫码中转；方案 A 配好后跳 qrconnect） -->
-      <div v-else class="qr-panel">
+      <!-- ===== PC 扫码视图（点「微信扫码登录」后展示，覆盖手机号表单） ===== -->
+      <div v-if="!wechatEnv && pcView === 'qr'" class="qr-panel">
         <div class="qr-title">微信扫码登录</div>
         <template v-if="pcUseQrconnect">
           <button class="login-btn wechat" :class="{ disabled: !agreed }" @click="onQrconnectLogin">
@@ -61,6 +69,7 @@
           </div>
           <button v-if="isMobileEnv" class="qr-copy" @click="onCopyLink">复制链接到微信打开</button>
         </template>
+        <button class="qr-back" @click="backToPhone">← 返回手机号登录</button>
       </div>
     </div>
 
@@ -193,6 +202,7 @@ const pcQrData = ref('')
 const pcQrExpired = ref(false)
 const pcUrl = ref('')
 const pcUseQrconnect = ref(false) // 方案 A 可用时改为官方扫码页
+const pcView = ref('phone')       // 'phone' 手机号表单 | 'qr' 扫码（切换后覆盖表单）
 const isMobileEnv = /android|iphone|ipad|ipod|windows phone|mobile/i.test(navigator.userAgent || '')
 let pcPollTimer = null
 
@@ -247,14 +257,24 @@ async function onQrconnectLogin() {
   genPcQr()
 }
 
-// PC 初始化：优先方案 A，否则方案 B 直接出码
-async function initPcLogin() {
+// 点「微信扫码登录」→ 切换到扫码视图（覆盖手机号表单）并出码
+async function showPcQrView() {
+  pcView.value = 'qr'
   const cfg = await fetchAuthConfig()
   if (cfg && cfg.pcWechatReady && cfg.wxOpenAppid) {
-    pcUseQrconnect.value = true
+    pcUseQrconnect.value = true // 方案 A：官方扫码页（用户点按钮再跳）
     return
   }
-  genPcQr()
+  genPcQr() // 方案 B：内嵌二维码 + 轮询
+}
+
+// 返回手机号登录：停止轮询 + 清掉二维码态
+function backToPhone() {
+  stopPcPoll()
+  pcQrExpired.value = false
+  pcQrData.value = ''
+  pcUseQrconnect.value = false
+  pcView.value = 'phone'
 }
 
 async function onCopyLink() {
@@ -336,8 +356,7 @@ onMounted(() => {
     }
     toast('请在手机微信中扫码打开')
   }
-  // PC / 外部浏览器：登录框内嵌二维码，打开即出码（方案 A 配好后自动优先官方扫码页）
-  if (!wechatEnv) initPcLogin()
+  // 注：PC 端二维码改为「点微信扫码登录」后才出码（不再自动出码），见 showPcQrView
 })
 
 onUnmounted(() => {
@@ -576,6 +595,13 @@ onUnmounted(() => {
   border: none;
   background: transparent;
   color: var(--primary);
+  font-size: rpx(24);
+}
+.qr-back {
+  margin-top: rpx(24);
+  border: none;
+  background: transparent;
+  color: var(--text-light);
   font-size: rpx(24);
 }
 .pc-wx-acts {

@@ -136,7 +136,7 @@
         <template v-else>
           <span class="section-title">评价本次订单</span>
           <span class="review-entry-desc">分享花材、包装、配送或服务体验</span>
-          <button class="review-entry-button" @click="goReview">去评价</button>
+          <button class="review-entry-button" @click="toast('评价页开发中')">去评价</button>
         </template>
       </div>
     </template>
@@ -147,7 +147,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { getOrderDetail } from '@/mock/api'
 import { money } from '@/store'
 import NavBar from '@/components/NavBar.vue'
@@ -155,7 +155,6 @@ import FlowerImage from '@/components/FlowerImage.vue'
 import RefundDialog from '@/components/RefundDialog.vue'
 
 const route = useRoute()
-const router = useRouter()
 const rpx = n => `${n / 750}rem`
 
 const order = ref(null)
@@ -199,11 +198,6 @@ function callRider() {
   const phone = order.value?.deliveryInfo?.phone
   if (phone) location.href = 'tel:' + String(phone).replace(/[^0-9]/g, '')
   else toast('暂未获取到骑手电话')
-}
-
-function goReview() {
-  if (!order.value) return
-  router.push({ name: 'review', params: { orderId: order.value.id } })
 }
 
 const toastText = ref('')
