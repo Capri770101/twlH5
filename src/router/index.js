@@ -18,7 +18,9 @@ const routes = [
   { path: '/favorites', name: 'favorites', component: () => import('@/pages/Favorites.vue') },
   { path: '/coupons', name: 'coupons', component: () => import('@/pages/CouponCenter.vue') },
   { path: '/my-coupons', name: 'my-coupons', component: () => import('@/pages/MyCoupons.vue') },
-  { path: '/search', name: 'search', component: () => import('@/pages/Search.vue') }
+  { path: '/search', name: 'search', component: () => import('@/pages/Search.vue') },
+  { path: '/my-plans', name: 'my-plans', component: () => import('@/pages/MyPlans.vue') },
+  { path: '/review/:orderId', name: 'review', component: () => import('@/pages/Review.vue') }
 ]
 
 // 开发态卡片自检页（仅本地 dev，不进生产包）

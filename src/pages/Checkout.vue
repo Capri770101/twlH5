@@ -78,14 +78,15 @@
         <div class="shop-header">
           <span class="shop-name">{{ group.shopName }}</span>
         </div>
-        <div v-for="product in group.items" :key="product.id" class="goods-item">
+        <div v-for="product in group.items" :key="product.id + '|' + (product.specId || '')" class="goods-item">
           <div class="goods-img">
             <FlowerImage :src="product.image" emoji="💐" />
           </div>
           <div class="goods-info">
             <span class="goods-name">{{ product.name }}</span>
-            <div v-if="product.subtitle" class="goods-specs">
-              <span>{{ product.subtitle }}</span>
+            <div v-if="product.specName || product.subtitle" class="goods-specs">
+              <span v-if="product.specName" class="goods-spec-chip">{{ product.specName }}</span>
+              <span v-if="product.subtitle">{{ product.subtitle }}</span>
             </div>
             <div class="goods-price-row">
               <span class="price price-sm">{{ money(product.price) }}</span>
@@ -93,10 +94,10 @@
                 <div
                   class="quantity-stepper-btn"
                   :class="{ disabled: product.quantity <= 1 }"
-                  @click.stop="changeQuantity(product.id, product.shopId, -1)"
+                  @click.stop="changeQuantity(product.id, product.shopId, -1, product.specId)"
                 >-</div>
                 <span class="quantity-stepper-value">{{ product.quantity }}</span>
-                <div class="quantity-stepper-btn" @click.stop="changeQuantity(product.id, product.shopId, 1)">+</div>
+                <div class="quantity-stepper-btn" @click.stop="changeQuantity(product.id, product.shopId, 1, product.specId)">+</div>
               </div>
             </div>
           </div>
@@ -405,7 +406,11 @@ async function onSubmit() {
     return
   }
   submitting.value = true
-  const items = groupedCart.value.flatMap(g => g.items)
+  // 规格信息并入 subtitle 快照（后端 order_items 无独立 spec 列）
+  const items = groupedCart.value.flatMap(g => g.items).map(it => ({
+    ...it,
+    subtitle: [it.specName, it.subtitle].filter(Boolean).join(' · ')
+  }))
   const firstShop = groupedCart.value[0] || {}
   const res = await createOrder({
     shopId: firstShop.shopId || 'default',
@@ -674,10 +679,21 @@ onUnmounted(() => clearTimeout(toastTimer))
   font-size: var(--fs-minor);
   color: #8d827c;
   background: #f7f5f2;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: rpx(8);
   align-self: flex-start;
   padding: rpx(2) rpx(12);
   border-radius: rpx(4);
+}
+.goods-spec-chip {
+  color: var(--primary);
+  font-weight: 600;
+}
+.goods-spec-chip + span::before {
+  content: '·';
+  margin-right: rpx(8);
+  color: #c9c0ba;
 }
 .goods-price-row {
   display: flex;

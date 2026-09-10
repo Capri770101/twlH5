@@ -53,17 +53,42 @@
         <button class="am-btn" @click="showAgreement = false">我已知晓</button>
       </div>
     </div>
+
+    <!-- PC 端 / 外部浏览器点微信登录：方案 B 扫码中转（禁静默授权，绝不 mock 建账号） -->
+    <div v-if="showPcQr" class="modal-mask" @click="closePcQr">
+      <div class="modal-content pc-wx-modal" @click.stop>
+        <div class="am-title">微信扫码登录</div>
+        <div class="am-body pc-wx-tip-body">
+          打开手机微信「扫一扫」，扫描下方二维码，
+          <br />在手机上完成授权后，电脑将自动登录。
+        </div>
+        <div class="pc-qr-wrap">
+          <img v-if="pcQrData" :src="pcQrData" class="pc-qr-img" alt="微信登录二维码" />
+          <div v-if="pcQrExpired" class="pc-qr-expired">
+            <div>二维码已过期</div>
+            <button class="pc-qr-refresh" @click="openPcQr">刷新二维码</button>
+          </div>
+        </div>
+        <div class="pc-qr-hint">请使用手机微信扫一扫</div>
+        <div class="pc-wx-acts">
+          <button class="am-btn pc-wx-copy" @click="onCopyLink">链接在手机打开</button>
+          <button class="am-btn pc-wx-close" @click="closePcQr">取消</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import QRCode from 'qrcode'
 import NavBar from '@/components/NavBar.vue'
-import { login } from '@/store'
+import store, { login } from '@/store'
 import {
-  loginByWechat, loginByPhone, sendSmsCode,
-  isWechatEnv, buildWechatAuthUrl, WX_APPID
+  loginByWechat, loginByWechatPc, loginByPhone, sendSmsCode,
+  isWechatEnv, buildWechatAuthUrl, buildWechatPcAuthUrl, fetchAuthConfig,
+  pcApprove, pcStatus, genPcTicket, WX_APPID
 } from '@/mock/api'
 
 const route = useRoute()
@@ -119,16 +144,27 @@ async function onPhoneLogin() {
   }
 }
 
-function onWechatLogin() {
+async function onWechatLogin() {
   if (!agreed.value) { toast('请先阅读并同意协议'); return }
-  // 真实接入：微信内 + 已配置 appId → 跳转微信网页授权，回跳后由后端 code2session 换取 token
+  // 微信内 + 已配置 appId → 跳公众号网页授权 snsapi_userinfo，回跳后由后端 code2session 换取 token
   if (wechatEnv && WX_APPID) {
     const authUrl = buildWechatAuthUrl(location.href)
     if (authUrl) { location.href = authUrl; return }
   }
-  // mock 阶段：直接模拟微信登录成功
-  toast('微信登录中…')
-  loginByWechat().then(({ userInfo, token }) => finishLogin(userInfo, token))
+  // ⚠️ 硬策略（2026-09-10）：任何场景禁用静默授权（包括 PC 端 / 外部浏览器 / AppID 缺失）。
+  // PC / 外部浏览器 → 优先开放平台「网站应用」扫码（后端配好 WX_OPEN_APPID 后自动启用）；
+  // 未配置 → 方案 B 扫码中转：PC 出二维码，手机微信扫码走 snsapi_userinfo 授权回传（有同意框）。
+  //   两条路都是用户主动授权，绝不 mock 自动建账号。
+  if (!wechatEnv) {
+    const cfg = await fetchAuthConfig()
+    if (cfg && cfg.pcWechatReady && cfg.wxOpenAppid) {
+      const pcAuthUrl = buildWechatPcAuthUrl(location.href, cfg.wxOpenAppid)
+      if (pcAuthUrl) { location.href = pcAuthUrl; return }
+    }
+    openPcQr() // 方案 B：H5 扫码中转
+    return
+  }
+  toast('微信授权未配置，请联系运营')
 }
 
 function finishLogin(userInfo, token) {
@@ -156,13 +192,114 @@ const showAgreement = ref(false)
 const agreementTitle = ref('')
 const agreementText = ref('')
 
-// 微信网页授权回跳：?code=xxx&state=twd → 自动用 code 登录（后端 code2session 换 openid）
-async function wechatLoginByCode(code) {
+// ===== PC 端微信登录·方案 B：扫码中转（无需微信开放平台审核，即刻可用） =====
+// PC 生成随机票据 → 二维码内容 = /login?pc=<ticket> → 手机微信扫码 → 公众号 snsapi_userinfo
+// 授权登录 → POST /auth/pc-approve 绑定 → PC 每 2s 轮询 /auth/pc-status → 拿同账号 token 登录。
+const showPcQr = ref(false)
+const pcQrData = ref('')
+const pcQrExpired = ref(false)
+const pcUrl = ref('')
+let pcPollTimer = null
+
+function stopPcPoll() {
+  if (pcPollTimer) { clearInterval(pcPollTimer); pcPollTimer = null }
+}
+
+function closePcQr() {
+  showPcQr.value = false
+  stopPcPoll()
+}
+
+async function openPcQr() {
+  const ticket = genPcTicket()
+  pcQrExpired.value = false
+  pcUrl.value = location.origin + '/login?pc=' + ticket
   try {
-    const clean = location.href.split('?')[0] + (location.search.replace(/[?&](code|state)=[^&]*/g, '').replace(/^&/, '?'))
+    pcQrData.value = await QRCode.toDataURL(pcUrl.value, { width: 320, margin: 1 })
+  } catch (e) {
+    toast('二维码生成失败，请重试')
+    return
+  }
+  showPcQr.value = true
+  stopPcPoll()
+  const startAt = Date.now()
+  pcPollTimer = setInterval(async () => {
+    if (!showPcQr.value) { stopPcPoll(); return }
+    if (Date.now() - startAt > 5 * 60 * 1000) { // 票据 TTL 5 分钟，过期出刷新
+      stopPcPoll(); pcQrExpired.value = true; return
+    }
+    try {
+      const d = await pcStatus(ticket)
+      if (d && d.status === 'approved' && d.token) {
+        stopPcPoll()
+        showPcQr.value = false
+        const u = d.user || {}
+        finishLogin({
+          id: String(u.id || ''),
+          nickname: u.nickname || '微信用户',
+          avatar: u.avatar || '',
+          phone: u.phone || '',
+          openid: u.openid || '',
+          guest: !!u.guest
+        }, d.token)
+      }
+    } catch (e) { /* 轮询瞬时失败静默重试 */ }
+  }, 2000)
+}
+
+async function onCopyLink() {
+  const text = pcUrl.value || location.href
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      // 旧浏览器降级：临时 textarea
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+    }
+    toast('链接已复制，去微信粘贴打开')
+  } catch (e) {
+    toast('复制失败，请手动选择链接复制')
+  }
+}
+
+// ===== 手机端：扫 PC 二维码打开（?pc=票据）→ 授权登录后回传 =====
+let phonePcTicket = ''
+
+async function approvePhonePc() {
+  const t = phonePcTicket
+  if (!t) return
+  phonePcTicket = ''
+  try {
+    await pcApprove(t)
+    toast('已授权电脑登录，可关闭本页')
+  } catch (e) {
+    toast(e.message || '电脑端授权失败')
+  }
+}
+
+// 微信授权回跳：微信内 ?code=xxx&state=twd → loginByWechat；PC 扫码 ?code=xxx&state=twdpc → loginByWechatPc
+// pcTicket：手机扫 PC 码后 OAuth 回跳带的票据，登录成功后回传授权而不是跳个人页
+async function wechatLoginByCode(code, state, pcTicket) {
+  try {
+    const clean = location.href.split('?')[0] + (location.search.replace(/[?&](code|state|pc)=[^&]*/g, '').replace(/^&/, '?'))
     history.replaceState(null, '', clean)
-    const { userInfo, token } = await loginByWechat({ code })
-    finishLogin(userInfo, token)
+    const { userInfo, token } = state === 'twdpc'
+      ? await loginByWechatPc({ code })   // PC 开放平台扫码（unionid 跨端归一）
+      : await loginByWechat({ code })     // 微信内公众号网页授权
+    if (pcTicket) {
+      // 手机扫 PC 码场景：登录后把票据授权给电脑，停留本页提示可关闭
+      login(userInfo, token)
+      await approvePhonePc()
+    } else {
+      finishLogin(userInfo, token)
+    }
   } catch (e) {
     toast(e.message || '微信登录失败，请重试')
   }
@@ -170,12 +307,31 @@ async function wechatLoginByCode(code) {
 
 onMounted(() => {
   const q = route.query
-  if (q.code && q.state === 'twd') wechatLoginByCode(String(q.code))
+  if (q.code && (q.state === 'twd' || q.state === 'twdpc')) {
+    const pc = (q.pc && /^[a-f0-9]{16,64}$/i.test(String(q.pc))) ? String(q.pc) : ''
+    wechatLoginByCode(String(q.code), String(q.state), pc)
+    return
+  }
+  // 扫 PC 二维码打开：已登录直接授权；未登录走微信授权（snsapi_userinfo 有同意框，不静默）
+  const pc = (q.pc && /^[a-f0-9]{16,64}$/i.test(String(q.pc))) ? String(q.pc) : ''
+  if (pc) {
+    phonePcTicket = pc
+    if (store.isLogged && store.token && !String(store.token).startsWith('mock_')) {
+      approvePhonePc()
+      return
+    }
+    if (wechatEnv && WX_APPID) {
+      const authUrl = buildWechatAuthUrl(location.href) // redirect_uri 保留 ?pc= 票据
+      if (authUrl) { location.href = authUrl; return }
+    }
+    toast('请在手机微信中扫码打开')
+  }
 })
 
 onUnmounted(() => {
   if (timer) clearInterval(timer)
   clearTimeout(toastTimer)
+  stopPcPoll()
 })
 </script>
 
@@ -331,6 +487,78 @@ onUnmounted(() => {
   width: rpx(600);
   max-height: rpx(800);
   overflow-y: auto;
+}
+
+/* PC 端微信扫码登录弹窗（方案 B） */
+.pc-wx-modal {
+  width: rpx(640);
+}
+.pc-wx-tip-body {
+  text-align: center;
+  font-size: rpx(26);
+  line-height: 1.8;
+  color: var(--text-secondary);
+}
+.pc-qr-wrap {
+  position: relative;
+  margin: rpx(28) auto 0;
+  width: rpx(360);
+  height: rpx(360);
+  background: #fff;
+  border: 1rpx solid var(--border-light);
+  border-radius: rpx(16);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.pc-qr-img {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.pc-qr-expired {
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.96);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: rpx(20);
+  font-size: rpx(26);
+  color: var(--text-secondary);
+}
+.pc-qr-refresh {
+  border: none;
+  border-radius: 999rpx;
+  background: var(--primary-gradient);
+  color: #fff;
+  font-size: rpx(26);
+  padding: rpx(14) rpx(40);
+}
+.pc-qr-hint {
+  margin-top: rpx(16);
+  text-align: center;
+  font-size: rpx(22);
+  color: var(--text-light);
+}
+.pc-wx-acts {
+  margin-top: rpx(28);
+  display: flex;
+  gap: rpx(20);
+}
+.pc-wx-acts .am-btn {
+  margin-top: 0;
+  flex: 1;
+}
+.pc-wx-copy {
+  background: var(--primary-gradient);
+  color: #fff;
+}
+.pc-wx-close {
+  background: #f6f3ee;
+  color: var(--text-secondary);
 }
 .am-title {
   font-size: rpx(32);

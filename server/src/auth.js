@@ -135,9 +135,14 @@ router.post('/guest', async (req, res) => {
 router.get('/config', (req, res) => {
   const appid = process.env.WX_OAUTH_APPID || process.env.WXPAY_SP_APPID || ''
   const secret = process.env.WX_OAUTH_SECRET || ''
+  const openAppid = process.env.WX_OPEN_APPID || ''
+  const openSecret = process.env.WX_OPEN_SECRET || ''
   res.json({
     wechatReady: !!(appid && secret),
     wxOauthMode: process.env.WX_OAUTH_MODE || 'oa',
+    // PC 端扫码登录（开放平台网站应用）：前端据此决定跳 qrconnect 还是引导去微信内打开
+    pcWechatReady: !!(openAppid && openSecret),
+    wxOpenAppid: openAppid,
     sms: smsMode(),
     payReady: !!(process.env.WXPAY_SP_MCHID && process.env.WXPAY_APIV3_KEY && process.env.WXPAY_MERCHANT_SERIAL)
   })
@@ -202,6 +207,51 @@ router.post('/sms/login', async (req, res) => {
 // ==================== 微信网页授权登录 ====================
 // body: { code, guestId?, bindUserId? } → code 换 openid → 统一账号 → { token:JWT, user }
 // 配置：.env 配 WX_OAUTH_APPID + WX_OAUTH_SECRET（服务号）；WX_OAUTH_MODE=oa|mp
+// ==================== 微信账号归一（公众号网页授权 / 开放平台扫码 共用） ====================
+/**
+ * 按 openid/unionid 匹配或创建用户行（事务内）。
+ * 关键：手机端(公众号)与 PC 端(网站应用)的 openid 不同（不同 appid 派生），
+ *      跨端同一人靠 unionid 匹配（前提：公众号与网站应用绑定同一开放平台账号）。
+ * users.openid 语义 = 该行最近一次微信登录渠道的 openid（换端登录时被 unionid 匹配复用，
+ * 重新写入新渠道 openid），unionid 才是跨端主键。
+ */
+async function wechatUpsert(conn, { openid, unionid, nickname, avatar, guestId, bindUserId }) {
+  const self = await findSelf(conn, bindUserId)
+  const [[pg]] = guestId
+    ? await conn.query('SELECT * FROM users WHERE guest_id = ? FOR UPDATE', [guestId])
+    : [[]]
+  const [[ou]] = openid
+    ? await conn.query('SELECT * FROM users WHERE openid = ? FOR UPDATE', [openid])
+    : [[]]
+  const [[un]] = unionid
+    ? await conn.query('SELECT * FROM users WHERE unionid = ? FOR UPDATE', [unionid])
+    : [[]]
+  // 候选行：openid 行 / unionid 行 / 当前登录行 / guest 行 → pickMain 归一并入（手机号行优先）
+  let cands = [ou, un]
+  for (const c of [self, pg]) {
+    if (c && !cands.some(x => x && x.id === c.id)) cands.push(c)
+  }
+  let main = await pickMain(conn, cands)
+  if (!main) {
+    const r = await conn.query(
+      'INSERT INTO users (openid, unionid, nickname, avatar) VALUES (?, ?, ?, ?)',
+      [openid || '', unionid || '', nickname || '', avatar || '']
+    )
+    main = { id: r[0].insertId }
+  }
+  if (openid && !main.openid) {
+    await conn.query('UPDATE users SET openid = ?, unionid = COALESCE(NULLIF(?, ""), unionid) WHERE id = ?',
+      [openid, unionid || '', main.id])
+  } else if (unionid && !main.unionid) {
+    await conn.query('UPDATE users SET unionid = ? WHERE id = ?', [unionid, main.id])
+  }
+  if (nickname && !main.nickname) await conn.query('UPDATE users SET nickname = ? WHERE id = ?', [nickname, main.id])
+  if (avatar && !main.avatar) await conn.query('UPDATE users SET avatar = ? WHERE id = ?', [avatar, main.id])
+  const [[row]] = await conn.query('SELECT * FROM users WHERE id = ?', [main.id])
+  return row
+}
+
+// ------------------------- 手机端：公众号网页授权 -------------------------
 router.post('/wechat', async (req, res) => {
   const appid = process.env.WX_OAUTH_APPID || process.env.WXPAY_SP_APPID || ''
   const secret = process.env.WX_OAUTH_SECRET || ''
@@ -212,6 +262,9 @@ router.post('/wechat', async (req, res) => {
   }
   const guestId = String((req.body && req.body.guestId) || '').trim() || null
   const bindUserId = (req.body && req.body.bindUserId) || ''
+  console.log('[auth/wechat] 请求: code=%s*(len=%d) guestId=%s bindUserId=%s ua=%s',
+    code.slice(0, 6), code.length, guestId || '-', bindUserId || '-',
+    String(req.headers['user-agent'] || '').slice(0, 60))
   try {
     await assertCanBind(req, bindUserId) // bindUserId 需对应 JWT（防越权合并）
     // 1) code 换 openid/unionid（oa=服务号网页授权；mp=小程序 code2session）
@@ -220,6 +273,8 @@ router.post('/wechat', async (req, res) => {
       ? `https://api.weixin.qq.com/sns/jscode2session?appid=${encodeURIComponent(appid)}&secret=${encodeURIComponent(secret)}&js_code=${encodeURIComponent(code)}&grant_type=authorization_code`
       : `https://api.weixin.qq.com/sns/oauth2/access_token?appid=${encodeURIComponent(appid)}&secret=${encodeURIComponent(secret)}&code=${encodeURIComponent(code)}&grant_type=authorization_code`
     const j = await fetch(api).then(r => r.json())
+    console.log('[auth/wechat] 微信返回: errcode=%s errmsg=%s openid=%s scope=%s mode=%s appid=%s',
+      j.errcode ?? 'ok', j.errmsg || '-', j.openid ? j.openid.slice(0, 6) + '*' : '无', j.scope || '-', mode, appid)
     if (!j.openid) {
       return res.status(400).json({ error: '微信授权失败：' + ((j && (j.errmsg || j.errcode)) || 'invalid code') })
     }
@@ -232,43 +287,127 @@ router.post('/wechat', async (req, res) => {
         if (u.nickname) nickname = String(u.nickname).slice(0, 32)
         if (u.headimgurl) avatar = String(u.headimgurl)
         if (u.unionid && !j.unionid) j.unionid = u.unionid
-      } catch (e) { /* 资料拉取失败不阻断登录 */ }
+      } catch (e) { console.error('[auth/wechat] userinfo 拉取失败(不阻断):', e && e.message) }
     }
-    // 2) 统一账号
-    const user = await withTx(async conn => {
-      const self = await findSelf(conn, bindUserId)
-      const [[pg]] = guestId
-        ? await conn.query('SELECT * FROM users WHERE guest_id = ? FOR UPDATE', [guestId])
-        : [[]]
-      const [[ou]] = await conn.query('SELECT * FROM users WHERE openid = ? FOR UPDATE', [j.openid])
-      // 已登录手机号账号 + 微信新 openid → 手机号行为主，openid 并入（mergeRow 转移 openid）
-      let cands = [ou]
-      if (self && self.id !== (ou && ou.id)) cands.push(self)
-      if (pg && pg.id !== (ou && ou.id) && pg.id !== (self && self.id)) cands.push(pg)
-      let main = await pickMain(conn, cands)
-      if (!main) {
-        const r = await conn.query(
-          'INSERT INTO users (openid, unionid, nickname, avatar) VALUES (?, ?, ?, ?)',
-          [j.openid, j.unionid || '', nickname || '', avatar || '']
-        )
-        main = { id: r[0].insertId }
-      }
-      if (!main.openid) {
-        await conn.query('UPDATE users SET openid = ?, unionid = COALESCE(NULLIF(?, ""), unionid) WHERE id = ?',
-          [j.openid, j.unionid || '', main.id])
-      } else if (j.unionid && !main.unionid) {
-        await conn.query('UPDATE users SET unionid = ? WHERE id = ?', [j.unionid, main.id])
-      }
-      if (nickname && !main.nickname) await conn.query('UPDATE users SET nickname = ? WHERE id = ?', [nickname, main.id])
-      if (avatar && !main.avatar) await conn.query('UPDATE users SET avatar = ? WHERE id = ?', [avatar, main.id])
-      const [[row]] = await conn.query('SELECT * FROM users WHERE id = ?', [main.id])
-      return row
-    })
+    // 2) 统一账号（openid + unionid 双匹配）
+    const user = await withTx(conn => wechatUpsert(conn, {
+      openid: j.openid, unionid: j.unionid || '', nickname, avatar,
+      guestId, bindUserId
+    }))
+    console.log('[auth/wechat] 登录成功: uid=%s nickname=%s', user.id, user.nickname || '-')
     res.json({ token: signToken(user.id), user: publicUser(user) })
   } catch (e) {
     const status = (e && e.status) || 500
-    if (status >= 500) console.error('[auth] wechat 失败：', e && e.message)
+    console.error('[auth/wechat] 失败 status=%s:', status, e && (e.message || e))
     res.status(status).json({ error: (e && e.message) || '微信登录失败' })
+  }
+})
+
+// ------------------------- PC 端：微信开放平台「网站应用」扫码登录 -------------------------
+// 流程：PC 前端跳 open.weixin.qq.com/connect/qrconnect(scope=snsapi_login) → 用户手机扫码确认
+//      → 回跳带 code → 本路由用 WX_OPEN_APPID/SECRET 换 token/openid/unionid → unionid 跨端归一。
+// 前置：微信公众平台注册的「网站应用」审核通过，且服务号绑定到同一开放平台账号（unionid 一致）。
+router.post('/wechat-pc', async (req, res) => {
+  const appid = process.env.WX_OPEN_APPID || ''
+  const secret = process.env.WX_OPEN_SECRET || ''
+  const code = String((req.body && req.body.code) || '').trim()
+  if (!code) return res.status(400).json({ error: 'missing code' })
+  if (!appid || !secret) {
+    return res.status(501).json({ error: 'PC 扫码登录未配置（缺 WX_OPEN_APPID/WX_OPEN_SECRET，需微信开放平台网站应用审核通过）' })
+  }
+  const guestId = String((req.body && req.body.guestId) || '').trim() || null
+  const bindUserId = (req.body && req.body.bindUserId) || ''
+  console.log('[auth/wechat-pc] 请求: code=%s*(len=%d) guestId=%s bindUserId=%s ua=%s',
+    code.slice(0, 6), code.length, guestId || '-', bindUserId || '-',
+    String(req.headers['user-agent'] || '').slice(0, 60))
+  try {
+    await assertCanBind(req, bindUserId)
+    // 1) code 换 access_token/openid/unionid（网站应用扫码登录，同一端点不同 appid）
+    const api = `https://api.weixin.qq.com/sns/oauth2/access_token?appid=${encodeURIComponent(appid)}&secret=${encodeURIComponent(secret)}&code=${encodeURIComponent(code)}&grant_type=authorization_code`
+    const j = await fetch(api).then(r => r.json())
+    console.log('[auth/wechat-pc] 微信返回: errcode=%s errmsg=%s openid=%s unionid=%s appid=%s',
+      j.errcode ?? 'ok', j.errmsg || '-', j.openid ? j.openid.slice(0, 6) + '*' : '无',
+      j.unionid ? j.unionid.slice(0, 6) + '*' : '无', appid)
+    if (!j.openid) {
+      return res.status(400).json({ error: '微信扫码登录失败：' + ((j && (j.errmsg || j.errcode)) || 'invalid code') })
+    }
+    // 2) snsapi_login 必有 access_token → 拉用户资料（昵称/头像 + unionid 兜底）
+    let nickname = ''
+    let avatar = ''
+    try {
+      const u = await fetch(`https://api.weixin.qq.com/sns/userinfo?access_token=${encodeURIComponent(j.access_token)}&openid=${encodeURIComponent(j.openid)}&lang=zh_CN`).then(r => r.json())
+      if (u.nickname) nickname = String(u.nickname).slice(0, 32)
+      if (u.headimgurl) avatar = String(u.headimgurl)
+      if (u.unionid && !j.unionid) j.unionid = u.unionid
+    } catch (e) { console.error('[auth/wechat-pc] userinfo 拉取失败(不阻断):', e && e.message) }
+    // 3) 统一账号（unionid 跨端匹配：与手机端同一微信用户落到同一行）
+    const user = await withTx(conn => wechatUpsert(conn, {
+      openid: j.openid, unionid: j.unionid || '', nickname, avatar,
+      guestId, bindUserId
+    }))
+    console.log('[auth/wechat-pc] 登录成功: uid=%s nickname=%s', user.id, user.nickname || '-')
+    res.json({ token: signToken(user.id), user: publicUser(user) })
+  } catch (e) {
+    const status = (e && e.status) || 500
+    console.error('[auth/wechat-pc] 失败 status=%s:', status, e && (e.message || e))
+    res.status(status).json({ error: (e && e.message) || 'PC 微信扫码登录失败' })
+  }
+})
+
+// ==================== PC 端：H5 扫码中转登录（方案 B，无需开放平台审核） ====================
+// 流程：PC 前端生成随机 ticket → 展示二维码（内容 = https://h5.tiaowulan.com/login?pc=<ticket>）→
+//      手机微信扫码打开 H5 → 公众号网页授权 snsapi_userinfo 登录（有同意框，符合硬策略）→
+//      手机端 POST /auth/pc-approve {ticket}（带 Bearer JWT）→
+//      PC 前端轮询 GET /auth/pc-status?ticket=xxx → approved 时下发同一 uid 的 JWT → PC 登录完成。
+// 安全：ticket 为前端 crypto 随机 32 位 hex，服务端格式校验；TTL 5 分钟；approve 后一次性消费。
+//       approve 必须 Bearer（手机端已登录）；status 无需鉴权（ticket 本身即为一次性凭据，随机不可猜）。
+const pcTickets = new Map() // ticket -> { uid, expires }
+const PC_TICKET_TTL = 5 * 60 * 1000
+const PC_TICKET_RE = /^[a-f0-9]{16,64}$/i
+
+function sweepPcTickets() {
+  const now = Date.now()
+  for (const [k, v] of pcTickets) if (v.expires < now) pcTickets.delete(k)
+}
+
+// 手机端：扫码后把 PC 票据绑定到当前登录账号
+router.post('/pc-approve', async (req, res) => {
+  try {
+    const ticket = String((req.body && req.body.ticket) || '').trim()
+    if (!PC_TICKET_RE.test(ticket)) return res.status(400).json({ error: 'invalid ticket' })
+    const auth = String(req.headers.authorization || '')
+    const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : ''
+    const payload = verifyToken(token)
+    if (!payload || !payload.uid) return res.status(401).json({ error: '请先在手机上完成微信登录' })
+    const uid = Number(payload.uid)
+    const rows = await hq('SELECT * FROM users WHERE id = ?', [uid])
+    if (!rows || !rows.length) return res.status(401).json({ error: '账号不存在' })
+    sweepPcTickets()
+    pcTickets.set(ticket, { uid, expires: Date.now() + PC_TICKET_TTL })
+    console.log('[auth/pc-approve] 票据授权: uid=%s nickname=%s', uid, rows[0].nickname || '-')
+    res.json({ ok: true })
+  } catch (e) {
+    console.error('[auth/pc-approve] 失败:', e && (e.message || e))
+    res.status(500).json({ error: '票据授权失败' })
+  }
+})
+
+// PC 端：轮询票据状态；approved 时下发同一账号 JWT 并消费票据（一次性）
+router.get('/pc-status', async (req, res) => {
+  try {
+    const ticket = String((req.query && req.query.ticket) || '').trim()
+    if (!PC_TICKET_RE.test(ticket)) return res.status(400).json({ error: 'invalid ticket' })
+    sweepPcTickets()
+    const t = pcTickets.get(ticket)
+    if (!t) return res.json({ status: 'pending' })
+    const rows = await hq('SELECT * FROM users WHERE id = ?', [t.uid])
+    pcTickets.delete(ticket) // 一次性消费：无论结果如何都作废，防重放
+    if (!rows || !rows.length) return res.json({ status: 'pending' })
+    console.log('[auth/pc-status] PC 登录完成: uid=%s nickname=%s', rows[0].id, rows[0].nickname || '-')
+    res.json({ status: 'approved', token: signToken(rows[0].id), user: publicUser(rows[0]) })
+  } catch (e) {
+    console.error('[auth/pc-status] 失败:', e && (e.message || e))
+    res.status(500).json({ error: '票据状态查询失败' })
   }
 })
 

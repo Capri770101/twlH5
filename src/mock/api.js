@@ -1,4 +1,5 @@
 import mockData from './data'
+import { getReviewByOrder, getReviewsByProduct } from '@/store'
 
 // ===== 真实后端数据层（MySQL 经由 Node 后端 /api 代理）=====
 // 默认开启：优先调 /api，失败（后端未起 / DB 不可达 / 无权限）自动回退下方 mock，保证页面永远有数据
@@ -164,9 +165,15 @@ export async function getFlowerList({ categoryId = '', sort = 'default', page = 
 
 // ===== 订单 =====
 function decorateOrder(o) {
+  // 后端尚无评价表，先并上本地保存的评价（本地评价后即视为已评价）
+  const rv = getReviewByOrder(o.id)
   return {
     ...o,
-    _hasReview: !!o.review,
+    _hasReview: !!o.review || !!rv,
+    _review: rv || null,
+    reviewRating: o.reviewRating || (rv && rv.rating) || 0,
+    reviewTags: o.reviewTags || (rv && rv.tags) || [],
+    review: o.review || (rv && rv.content) || '',
     _canDelete: ['completed', 'refunded', 'refund_failed', 'cancelled'].includes(o.status),
     _canRefund: ['pending', 'making', 'delivering'].includes(o.status),
     _totalQty: (o.items || []).reduce((s, i) => s + (i.quantity || 1), 0)
@@ -478,6 +485,36 @@ export async function getShopReviews(shopId) {
   return SAMPLE_REVIEWS
 }
 
+function fmtReviewDate(ts) {
+  if (!ts) return ''
+  const d = new Date(ts)
+  const p = n => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+
+/**
+ * 商品评价：本地（本人评价，最新在前）+ 后端（若已提供接口）+ 示例评价兜底
+ * 后端暂无 /flowers/:id/reviews，失败时静默降级
+ */
+export async function getProductReviews(productId) {
+  const local = getReviewsByProduct(productId).map(r => ({
+    user: r.anonymous ? '匿名用户' : '我',
+    rating: r.rating,
+    content: r.content || '此用户没有填写评价',
+    date: fmtReviewDate(r.createdAt),
+    tags: r.tags || [],
+    mine: true
+  }))
+  if (REAL_API_ENABLED) {
+    try {
+      const remote = await realApi('/flowers/' + encodeURIComponent(productId) + '/reviews')
+      if (Array.isArray(remote) && remote.length) return [...local, ...remote]
+    } catch (e) { /* 后端暂无商品评价接口，静默走兜底 */ }
+  }
+  await delay(80)
+  return [...local, ...SAMPLE_REVIEWS]
+}
+
 // 全部店铺列表（首页「更多花店」入口）
 export async function getShopList() {
   if (REAL_API_ENABLED) {
@@ -512,13 +549,18 @@ export async function searchAll(keyword) {
 
 // 微信公众平台（服务号）AppId：真接入网页授权时填上（需与后端 WX_OAUTH_APPID 一致）；
 // 留空时「微信登录」自动降级为匿名访客登录（guest 账号，后续可用手机号绑定找回）
-export const WX_APPID = ''
+export const WX_APPID = 'wx7ae8fa263da38a91'
 // 是否微信内置浏览器（用于切换登录方式 / 触发网页授权）
 export function isWechatEnv() {
   return typeof navigator !== 'undefined' && /micromessenger/i.test(navigator.userAgent)
 }
 
-// 组装微信网页授权跳转地址（snsapi_userinfo 拿昵称头像）
+// 组装微信网页授权跳转地址
+// scope 说明：snsapi_base 静默授权（只拿 openid，免点击同意，无认证要求）；
+//             snsapi_userinfo 需认证服务号 + 用户手动同意（拿昵称头像）。
+// 2026-09-10 Capri 要求完整授权体验 → 切回 snsapi_userinfo（有同意页 + 昵称头像）。
+// ⚠️ 硬策略（2026-09-10）：任何场景禁用静默授权（包括 PC 端 / 外部浏览器）。绝不调用 snsapi_base。
+//    PC 端点微信登录会弹引导模态框让用户复制链接去微信内打开，禁止 mock 自动建账号。
 export function buildWechatAuthUrl(redirect) {
   const appId = WX_APPID
   if (!appId) return ''
@@ -562,44 +604,105 @@ function shapeUser(d, fallbackNick) {
   }
 }
 
-// 微信登录：真接入(code=授权回跳) → /auth/wechat 换 openid 统一账号；
-// 未配置/无 code/网络失败 → 当前阶段等价于「匿名访客登录」（guest_id 落库）
+// 微信登录：真接入(code=授权回跳) → /auth/wechat 换 openid 统一账号。
+// ⚠️ 硬策略（2026-09-10）：任何场景禁用静默授权（包括 PC 端 / 外部浏览器 / AppID 缺失 / 网络失败）。
+//    - 无 code 进来 → 抛出错误（前端必须先经过 buildWechatAuthUrl 跳授权页回跳拿 code）
+//    - 网络失败 → 抛出错误，禁止降级 ensureGuestAuth 创建匿名账号（避免「假微信登录成功」误导用户）
 export async function loginByWechat(profile) {
   const code = profile && profile.code
-  if (REAL_API_ENABLED && code) {
-    try {
-      const { guestId, bindUserId } = currentIdentity()
-      const d = await realPost('/auth/wechat', {
-        code,
-        guestId: guestId || undefined,
-        bindUserId: bindUserId || undefined
-      }, localToken() || undefined)
-      const info = shapeUser(d, '微信用户')
-      persistAuth(d.token, info)
-      return { userInfo: info, token: d.token }
-    } catch (e) {
-      if (!isNetErr(e)) throw e
-      console.warn('[api] /auth/wechat 网络失败，降级访客：', e && e.message)
-    }
+  if (!REAL_API_ENABLED) {
+    throw new Error('微信登录未配置（VITE_API_BASE 缺失）')
   }
-  const a = await ensureGuestAuth()
-  if (!a.offline) {
-    const info = {
-      ...a.userInfo,
-      nickname: (profile && profile.nickname) || a.userInfo.nickname || '微信用户'
-    }
-    persistAuth(a.token, info)
-    return { userInfo: info, token: a.token }
+  if (!code) {
+    throw new Error('缺少授权 code（请通过微信网页授权 snsapi_userinfo 拿到 code 后回跳）')
   }
-  await delay(300)
-  const userInfo = {
-    id: 'u_' + Math.random().toString(36).slice(2, 8),
-    nickname: (profile && profile.nickname) || '微信用户',
-    avatar: (profile && profile.avatar) || '',
-    phone: ''
+  const { guestId, bindUserId } = currentIdentity()
+  const d = await realPost('/auth/wechat', {
+    code,
+    guestId: guestId || undefined,
+    bindUserId: bindUserId || undefined
+  }, localToken() || undefined)
+  const info = shapeUser(d, '微信用户')
+  persistAuth(d.token, info)
+  return { userInfo: info, token: d.token }
+}
+
+// ===== PC 端微信扫码登录（微信开放平台「网站应用」，scope=snsapi_login） =====
+// 流程：PC 点微信登录 → 拉 /auth/config 看 pcWechatReady → 跳 qrconnect 二维码页 →
+//      手机微信扫码确认 → 回跳带 code(state=twdpc) → loginByWechatPc → 后端 unionid 跨端归一。
+// 未配置（网站应用还在审核）→ 前端保持「请在微信中打开」引导，绝不静默建账号。
+
+// /auth/config 带缓存（配置只在后端重启后变化，会话内缓存足够）
+let authConfigCache = null
+export async function fetchAuthConfig(force) {
+  if (!REAL_API_ENABLED) return null
+  if (authConfigCache && !force) return authConfigCache
+  try {
+    authConfigCache = await realApi('/auth/config')
+    return authConfigCache
+  } catch (e) {
+    console.warn('[api] /auth/config 拉取失败：', e && e.message)
+    return null
   }
-  const token = 'mock_wx_' + Math.random().toString(36).slice(2, 12)
-  return { userInfo, token }
+}
+
+// PC 端扫码授权地址（qrconnect 与手机端 authorize 不同端点；appId = 开放平台网站应用 AppID）
+export function buildWechatPcAuthUrl(redirect, appId) {
+  if (!appId) return ''
+  const r = encodeURIComponent(redirect || location.href)
+  return `https://open.weixin.qq.com/connect/qrconnect?appid=${appId}` +
+    `&redirect_uri=${r}&response_type=code&scope=snsapi_login&state=twdpc#wechat_redirect`
+}
+
+// PC 扫码回跳 code 登录（后端 /auth/wechat-pc 换 token/unionid，与手机端同一账号体系）
+// 同硬策略：无 code / 网络失败 → 抛错，禁止任何降级。
+export async function loginByWechatPc(profile) {
+  const code = profile && profile.code
+  if (!REAL_API_ENABLED) {
+    throw new Error('微信登录未配置（VITE_API_BASE 缺失）')
+  }
+  if (!code) {
+    throw new Error('缺少授权 code（请通过微信扫码登录 snsapi_login 拿到 code 后回跳）')
+  }
+  const { guestId, bindUserId } = currentIdentity()
+  const d = await realPost('/auth/wechat-pc', {
+    code,
+    guestId: guestId || undefined,
+    bindUserId: bindUserId || undefined
+  }, localToken() || undefined)
+  const info = shapeUser(d, '微信用户')
+  persistAuth(d.token, info)
+  return { userInfo: info, token: d.token }
+}
+
+// ===== PC 端微信登录·方案 B：H5 扫码中转（无需微信开放平台审核，即刻可用） =====
+// 流程：PC 前端生成随机 ticket → 二维码内容 = https://h5.tiaowulan.com/login?pc=<ticket> →
+//      手机微信扫码打开 H5 → 走公众号网页授权 snsapi_userinfo 登录（有同意框，符合硬策略）→
+//      手机端调 pcApprove(ticket) 把票据绑到当前账号 →
+//      PC 端轮询 pcStatus(ticket) → approved 时拿到同账号 token 登录完成。
+// 票据 TTL 5 分钟、一次性消费；与手机微信登录是同一 uid（订单/地址互通）。
+
+// 生成 PC 扫码票据（crypto 随机 32 位 hex；后端正则 ^[a-f0-9]{16,64}$ 校验）
+export function genPcTicket() {
+  const c = (typeof crypto !== 'undefined' && crypto.getRandomValues) ? crypto : null
+  const buf = new Uint8Array(16)
+  if (c) c.getRandomValues(buf)
+  else for (let i = 0; i < 16; i++) buf[i] = Math.floor(Math.random() * 256)
+  return Array.from(buf).map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+// 手机端：登录后调用（带本地 token），把 PC 票据绑定到当前账号
+export async function pcApprove(ticket) {
+  if (!REAL_API_ENABLED) throw new Error('微信登录未配置（VITE_API_BASE 缺失）')
+  if (!ticket) throw new Error('缺少 PC 票据')
+  return realPost('/auth/pc-approve', { ticket }, localToken() || undefined)
+}
+
+// PC 端：轮询票据状态；approved 时返回 { status:'approved', token, user }
+export async function pcStatus(ticket) {
+  if (!REAL_API_ENABLED) throw new Error('微信登录未配置（VITE_API_BASE 缺失）')
+  if (!ticket) throw new Error('缺少 PC 票据')
+  return realApi('/auth/pc-status', { ticket })
 }
 
 // 发送短信验证码：真后端 debug 模式回显测试码（供 UI 提示）；tencent 模式真发

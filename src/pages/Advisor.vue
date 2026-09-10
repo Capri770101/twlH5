@@ -80,6 +80,8 @@
             @order="onCardOrder"
             @view-order="onViewOrder"
             @save-diy-plan="onSaveDiyPlan"
+            @go-shop="onGoShop"
+            @go-detail="onGoDetail"
           />
 
           <!-- 效果图（轮询任务回填） -->
@@ -167,7 +169,7 @@ import { ref, nextTick, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import NavBar from '@/components/NavBar.vue'
 import FlowerImage from '@/components/FlowerImage.vue'
-import store, { addToCart } from '@/store'
+import store, { addToCart, saveDiyPlan } from '@/store'
 import AdvisorCards from '@/components/AdvisorCards.vue'
 import { chatWithAdvisor, streamAdvisorChat, pollAgentTask, ADVISOR_PRESETS, AGENT_CONFIG } from '@/mock/api'
 import { extractDiyPlan, isDiyScene } from '@/utils/extractDiyPlan'
@@ -479,6 +481,19 @@ function onViewOrder(id) {
   else router.push('/orders')
 }
 
+// 店铺卡：进店 → 店铺详情页（shop_id 为平台真实店铺 id）
+function onGoShop(shop) {
+  const id = shop && String(shop.shop_id || shop.id || '').trim()
+  if (!id) { toast('店铺信息缺失'); return }
+  router.push({ name: 'shop-detail', params: { id } })
+}
+
+// 方案卡：看花束详情（plan id 为真实商品 id，可与商详页直通）
+function onGoDetail(p) {
+  if (!p || !p.id) { toast('商品信息缺失'); return }
+  router.push({ name: 'detail', params: { id: p.id } })
+}
+
 // 支付：跳订单列表（待支付 tab），后续接平台收银台
 function onCardPay(pay) {
   if (pay && pay.order_id) router.push('/order/' + encodeURIComponent(pay.order_id))
@@ -532,33 +547,23 @@ function attachDiyPlan(msg) {
   scrollToBottom()
 }
 
-// DIY 方案「保存到我的方案」 → localStorage（结构同收藏）
-const DIY_PLANS_KEY = 'twl-diy-plans'
+// DIY 方案「保存到我的方案」 → store（localStorage 持久化，见「我的 → 我的方案」）
 function onSaveDiyPlan(plan) {
   if (!plan || !plan.id) { toast('方案数据缺失，保存失败'); return }
-  try {
-    const raw = localStorage.getItem(DIY_PLANS_KEY)
-    const arr = raw ? JSON.parse(raw) : []
-    const filtered = (Array.isArray(arr) ? arr : []).filter(x => x && x.id !== plan.id)
-    filtered.unshift({
-      id: plan.id,
-      name: plan.name,
-      desc: plan.desc || '',
-      price: plan.price,
-      image: plan.image || '',
-      materials: plan.materials || [],
-      budget: plan.budget || [],
-      careTips: plan.careTips || '',
-      greeting: plan.greeting || '',
-      skillLevel: plan.skillLevel || '',
-      suitableFor: plan.suitableFor || '',
-      savedAt: Date.now()
-    })
-    localStorage.setItem(DIY_PLANS_KEY, JSON.stringify(filtered.slice(0, 30)))
-    toast('已保存到「我的方案」')
-  } catch (e) {
-    toast('保存失败，请稍后再试')
-  }
+  const ok = saveDiyPlan({
+    id: plan.id,
+    name: plan.name,
+    desc: plan.desc,
+    price: plan.price,
+    image: plan.image,
+    materials: plan.materials,
+    budget: plan.budget,
+    careTips: plan.careTips,
+    greeting: plan.greeting,
+    skillLevel: plan.skillLevel,
+    suitableFor: plan.suitableFor
+  })
+  toast(ok ? '已保存到「我的方案」' : '保存失败，请稍后再试')
 }
 
 // 与 Home/Cart 等页面一致的轻量 toast

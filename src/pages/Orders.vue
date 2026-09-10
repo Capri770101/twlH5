@@ -51,7 +51,7 @@
           <button class="btn btn-primary btn-sm" @click.stop="onPay(order)">去支付</button>
         </div>
         <div v-else-if="order.status === 'completed'" class="order-actions">
-          <button v-if="!order._hasReview" class="btn btn-outline btn-sm" @click.stop="toast('评价页开发中')">去评价</button>
+          <button v-if="!order._hasReview" class="btn btn-outline btn-sm" @click.stop="goReview(order.id)">去评价</button>
           <button class="btn btn-primary btn-sm" @click.stop="repeatOrder(order)">再来一单</button>
         </div>
         <div v-else-if="!['refunding', 'refunded', 'refund_failed', 'cancelled'].includes(order.status)" class="order-actions">
@@ -124,6 +124,10 @@ function onTabChange(value) {
 
 function goDetail(id) {
   router.push({ name: 'order-detail', params: { id } })
+}
+
+function goReview(id) {
+  router.push({ name: 'review', params: { orderId: id } })
 }
 
 function repeatOrder(order) {

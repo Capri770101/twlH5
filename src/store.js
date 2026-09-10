@@ -12,6 +12,10 @@ const state = reactive({
   selectedAddress: null,
   // 商品收藏（纯本地，localStorage 持久化）
   favorites: [],
+  // AI 生成的 DIY 花束方案（本地保存，localStorage 持久化）
+  diyPlans: [],
+  // 订单评价（本地持久化，正式待后端评价接口）
+  reviews: [],
   // 优惠券（本地领取，localStorage 持久化；正式核销待后端券接口）
   coupons: []
 })
@@ -75,7 +79,12 @@ export const groupedCart = computed(() => {
 export function addToCart(product, quantity = 1) {
   const cart = state.cart
   const pShopId = product.shopId || state.shopId || ''
-  const exist = cart.find(item => item.id === product.id && item.shopId === pShopId)
+  const specId = product.specId || ''
+  const exist = cart.find(item =>
+    item.id === product.id &&
+    item.shopId === pShopId &&
+    (item.specId || '') === specId
+  )
   if (exist) {
     exist.quantity += quantity
     if (product.shopName) exist.shopName = product.shopName
@@ -90,22 +99,32 @@ export function addToCart(product, quantity = 1) {
       stock: product.stock ?? null,
       quantity,
       shopId: pShopId,
-      shopName: product.shopName || ''
+      shopName: product.shopName || '',
+      specId,
+      specName: product.specName || ''
     })
   }
   persistCart()
 }
 
-export function changeQuantity(id, shopId, delta) {
-  const item = state.cart.find(i => i.id === id && i.shopId === (shopId || 'default'))
+export function changeQuantity(id, shopId, delta, specId = '') {
+  const item = state.cart.find(i =>
+    i.id === id &&
+    i.shopId === (shopId || 'default') &&
+    (i.specId || '') === (specId || '')
+  )
   if (!item) return
   item.quantity += delta
   if (item.quantity < 1) item.quantity = 1
   persistCart()
 }
 
-export function removeFromCart(id, shopId) {
-  const idx = state.cart.findIndex(i => i.id === id && i.shopId === (shopId || 'default'))
+export function removeFromCart(id, shopId, specId = '') {
+  const idx = state.cart.findIndex(i =>
+    i.id === id &&
+    i.shopId === (shopId || 'default') &&
+    (i.specId || '') === (specId || '')
+  )
   if (idx >= 0) state.cart.splice(idx, 1)
   persistCart()
 }
@@ -252,6 +271,100 @@ export function removeFavorite(id) {
 export function clearFavorites() {
   state.favorites.splice(0, state.favorites.length)
   persistFavorites()
+}
+
+/* ============ AI DIY 方案（本地保存 + 持久化，来自 AI 顾问的方案卡） ============ */
+
+const DIY_PLANS_KEY = 'twl-diy-plans'
+try {
+  const plans = JSON.parse(localStorage.getItem(DIY_PLANS_KEY) || '[]')
+  if (Array.isArray(plans) && plans.length) state.diyPlans = plans
+} catch (e) {}
+
+function persistDiyPlans() {
+  localStorage.setItem(DIY_PLANS_KEY, JSON.stringify(state.diyPlans))
+}
+
+export const diyPlanCount = computed(() => state.diyPlans.length)
+
+/** 保存/更新一个 DIY 方案（同 id 覆盖，最新在前，最多 30 条） */
+export function saveDiyPlan(plan) {
+  if (!plan || !plan.id) return false
+  const filtered = state.diyPlans.filter(p => p && p.id !== plan.id)
+  filtered.unshift({
+    id: plan.id,
+    name: plan.name || 'AI 定制方案',
+    desc: plan.desc || '',
+    price: Number(plan.price) || 0, // 单位：元
+    image: plan.image || '',
+    materials: plan.materials || [],
+    budget: plan.budget || [],
+    careTips: plan.careTips || '',
+    greeting: plan.greeting || '',
+    skillLevel: plan.skillLevel || '',
+    suitableFor: plan.suitableFor || '',
+    savedAt: Date.now()
+  })
+  state.diyPlans.splice(0, state.diyPlans.length, ...filtered.slice(0, 30))
+  persistDiyPlans()
+  return true
+}
+
+export function removeDiyPlan(id) {
+  const idx = state.diyPlans.findIndex(p => p.id === id)
+  if (idx >= 0) {
+    state.diyPlans.splice(idx, 1)
+    persistDiyPlans()
+  }
+}
+
+/* ============ 订单评价（本地持久化，正式待后端评价接口） ============ */
+
+const REVIEW_KEY = 'twd_reviews'
+try {
+  const rvs = JSON.parse(localStorage.getItem(REVIEW_KEY) || '[]')
+  if (Array.isArray(rvs) && rvs.length) state.reviews = rvs
+} catch (e) {}
+
+function persistReviews() {
+  localStorage.setItem(REVIEW_KEY, JSON.stringify(state.reviews))
+}
+
+/** 保存/覆盖一条订单评价（同订单只保留最新一条） */
+export function saveReview(review) {
+  if (!review || !review.orderId) return null
+  const row = {
+    id: review.id || 'rv_' + Date.now(),
+    orderId: String(review.orderId),
+    shopId: review.shopId || '',
+    shopName: review.shopName || '',
+    items: review.items || [],
+    rating: Number(review.rating) || 5,
+    ratings: review.ratings || { fresh: 5, pack: 5, delivery: 5 },
+    content: review.content || '',
+    tags: review.tags || [],
+    anonymous: !!review.anonymous,
+    createdAt: Date.now()
+  }
+  const idx = state.reviews.findIndex(r => r.orderId === row.orderId)
+  if (idx >= 0) state.reviews.splice(idx, 1, row)
+  else state.reviews.unshift(row)
+  persistReviews()
+  return row
+}
+
+export function getReviewByOrder(orderId) {
+  return state.reviews.find(r => r.orderId === String(orderId)) || null
+}
+
+export function hasReview(orderId) {
+  return state.reviews.some(r => r.orderId === String(orderId))
+}
+
+/** 某商品收到的评价（按订单商品快照匹配 productId） */
+export function getReviewsByProduct(productId) {
+  const pid = String(productId)
+  return state.reviews.filter(r => (r.items || []).some(i => String(i.productId) === pid))
 }
 
 /* ============ 优惠券（本地领取 + 持久化，正式核销待后端券接口） ============ */

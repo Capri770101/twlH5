@@ -4,7 +4,7 @@
     <template v-if="ui === 'plan_card'">
       <div class="adv-card-title">为你挑选的花束 <span v-if="plans.length" class="adv-card-count">{{ plans.length }} 款</span></div>
       <div class="plan-scroll">
-        <div v-for="p in plans" :key="p.id" class="plan-card">
+        <div v-for="p in plans" :key="p.id" class="plan-card" @click="$emit('go-detail', p)">
           <FlowerImage :src="p.image" :emoji="'💐'" class="plan-img" />
           <div class="plan-body">
             <div class="plan-name text-ellipsis">{{ p.name }}</div>
@@ -15,9 +15,9 @@
             </div>
             <div class="plan-foot">
               <span class="plan-price">¥{{ p.priceText }}</span>
-              <div class="plan-acts">
+              <div class="plan-acts" @click.stop>
                 <span class="plan-act cart" @click="$emit('buy', { item: p, mode: 'cart' })">加购</span>
-                <span class="plan-act buy" @click="$emit('buy', { item: p, mode: 'now' })">购买</span>
+                <span class="plan-act buy" @click="$emit('buy', { item: p, mode: 'now' })">下单</span>
               </div>
             </div>
           </div>
@@ -54,22 +54,27 @@
 
     <!-- ===== 店铺卡 shop_card ===== -->
     <template v-else-if="ui === 'shop_card'">
-      <div class="adv-card-title">附近可接单的花店</div>
+      <div class="adv-card-title">为你找到的花店 <span v-if="shops.length" class="adv-card-count">{{ shops.length }} 家</span></div>
       <div
         v-for="s in shops"
         :key="s.shop_id"
         class="shop-card"
-        @click="$emit('send', '我要 ' + s.name + ' 的花')"
+        @click="$emit('go-shop', s)"
       >
+        <FlowerImage :src="s.avatar" :emoji="'🏪'" class="shop-logo" />
         <div class="shop-main">
-          <div class="shop-name text-ellipsis">{{ s.name }}</div>
-          <div class="shop-meta">
+          <div class="shop-name-line">
+            <span class="shop-name text-ellipsis">{{ s.name }}</span>
             <span v-if="s.rating" class="shop-rating">★ {{ s.rating }}</span>
-            <span v-if="s.distance_km != null" class="shop-dist">{{ s.distance_km }}km</span>
-            <span v-if="s.price_range" class="shop-range">{{ s.price_range }}</span>
+          </div>
+          <div v-if="s.address" class="shop-addr text-ellipsis">{{ s.address }}</div>
+          <div class="shop-meta">
+            <span v-if="s.openText" class="shop-open" :class="{ closed: !s.open }">{{ s.openText }}</span>
+            <span v-if="s.deliveryText" class="shop-dist">🛵 {{ s.deliveryText }}</span>
+            <span v-if="s.deliveryFee != null" class="shop-range">{{ s.deliveryFee > 0 ? '配送 ¥' + s.deliveryFee : '免配送费' }}</span>
           </div>
         </div>
-        <span class="shop-pick">选这家</span>
+        <span class="shop-pick">进店 ›</span>
       </div>
     </template>
 
@@ -98,7 +103,7 @@
     <!-- ===== 电子贺卡 greeting_card ===== -->
     <template v-else-if="ui === 'greeting_card'">
       <div class="greet-card">
-        <FlowerImage :src="greet.image_url" :emoji="'💌'" class="greet-img" />
+        <FlowerImage :src="greetImg" :emoji="'💌'" class="greet-img" />
         <div class="greet-text" v-if="greet.text">{{ greet.text }}</div>
         <div class="greet-foot">
           <span v-if="greet.recipient">To. {{ greet.recipient }}</span>
@@ -195,11 +200,21 @@ import { pollAgentTask, AGENT_CONFIG } from '@/mock/api'
 const props = defineProps({
   card: { type: Object, default: () => ({}) }
 })
-defineEmits(['buy', 'send', 'pay', 'order', 'view-order', 'save-diy-plan'])
+defineEmits(['buy', 'send', 'pay', 'order', 'view-order', 'save-diy-plan', 'go-shop', 'go-detail'])
 
 function fmt(n) {
   const v = Number(n)
   return Number.isFinite(v) ? (Math.round(v * 100) / 100).toFixed(2) : '0.00'
+}
+
+// 智能体平台下发的图片偶为相对路径（/uploads/...），补 aistore 域名
+const AISTORE_BASE = 'https://aistore.xiangbinmeigui.com'
+function absImg(u) {
+  const s = String(u || '')
+  if (!s) return ''
+  if (/^https?:/i.test(s)) return s
+  if (s.startsWith('/uploads')) return AISTORE_BASE + s
+  return s
 }
 
 // 平台偶发把真实 payload 再包一层 data，这里做兼容
@@ -220,7 +235,7 @@ const plans = computed(() =>
       name: p.name || '推荐花束',
       price,
       priceText: price ? price.toFixed(2) : '到店咨询',
-      image: p.image || p.image_url || p.effect_image_url || '',
+      image: absImg(p.image || p.image_url || p.effect_image_url || ''),
       desc: p.desc || p.description || '',
       stock: Number(p.stock != null ? p.stock : 99),
       shopId: p.shop_id || p.shopId || 'default',
@@ -249,13 +264,22 @@ const planTypeText = computed(() => {
 })
 
 const shops = computed(() =>
-  (P.value.shops || []).map(s => ({
-    shop_id: s.shop_id || s.shopId || s.id || '',
-    name: s.name || '花店',
-    distance_km: s.distance_km != null ? s.distance_km : (s.distanceKm != null ? s.distanceKm : null),
-    price_range: s.price_range || s.priceRange || '',
-    rating: s.rating != null ? Number(s.rating).toFixed(1) : ''
-  }))
+  (P.value.shops || []).map(s => {
+    const open = s.is_open_now != null ? !!s.is_open_now : (s.status ? s.status !== 'closed' : true)
+    return {
+      shop_id: String(s.shop_id || s.shopId || s.id || ''),
+      name: s.name || '花店',
+      avatar: absImg(s.avatar || s.cover || s.logo || ''),
+      rating: s.rating != null ? Number(s.rating).toFixed(1) : '',
+      address: s.address || '',
+      open,
+      openText: s.open_status_text || (open ? '营业中' : '休息中'),
+      deliveryText: s.delivery_time || '',
+      deliveryFee: s.delivery_fee != null ? Number(s.delivery_fee) : null,
+      distance_km: s.distance_km != null ? s.distance_km : (s.distanceKm != null ? s.distanceKm : null),
+      price_range: s.price_range || s.priceRange || ''
+    }
+  })
 )
 
 const pay = computed(() => P.value)
@@ -267,6 +291,7 @@ const payAmount = computed(() => {
 const options = computed(() => (P.value.options || []).map(o => ({ label: o.label || o.text || '', value: o.value != null ? o.value : (o.label || o.text || '') })))
 
 const greet = computed(() => P.value)
+const greetImg = computed(() => absImg(P.value.image_url || P.value.image || ''))
 
 // ===== DIY 方案卡 diy_plan_card =====
 const diyPlan = computed(() => {
@@ -305,7 +330,7 @@ const diyPlan = computed(() => {
     name,
     price,
     priceText: price ? price.toFixed(2) : '到店咨询',
-    image: d.effect_image_url || d.image_url || d.image || '',
+    image: absImg(d.effect_image_url || d.image_url || d.image || ''),
     desc: d.desc || '',
     stock: 99,
     shopId: d.shop_id || 'default',
@@ -319,7 +344,7 @@ const diyPlan = computed(() => {
     desc: d.desc || '',
     price,
     priceText: price ? price.toFixed(2) : '到店咨询',
-    image: d.effect_image_url || d.image_url || d.image || '',
+    image: absImg(d.effect_image_url || d.image_url || d.image || ''),
     skillLevel,
     suitableFor,
     materials,
@@ -349,7 +374,7 @@ function showHint(t) {
 }
 
 // 生图任务：有结果直接展示，否则轮询 /tasks/{id}
-const taskImage = ref(P.value.result_url || P.value.image_url || '')
+const taskImage = ref(absImg(P.value.result_url || P.value.image_url || ''))
 onMounted(() => {
   if (taskImage.value) return
   const poll = P.value.poll
@@ -357,7 +382,7 @@ onMounted(() => {
   if (!poll && !taskId) return
   const url = String(poll || ('/tasks/' + taskId))
   const full = /^https?:/.test(url) ? url : AGENT_CONFIG.apiBase + (url.startsWith('/') ? url : '/' + url)
-  pollAgentTask(full, img => { if (img) taskImage.value = img })
+  pollAgentTask(full, img => { if (img) taskImage.value = absImg(img) })
 })
 </script>
 
@@ -396,6 +421,8 @@ onMounted(() => {
   border-radius: rpx(16);
   background: #fff;
   overflow: hidden;
+  cursor: pointer;
+  &:active { background: #faf8f4; }
 }
 .plan-img {
   width: 100%;
@@ -435,8 +462,8 @@ onMounted(() => {
 .plan-foot {
   margin-top: rpx(10);
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  gap: rpx(10);
 }
 .plan-price {
   color: #e8615d;
@@ -445,10 +472,12 @@ onMounted(() => {
 }
 .plan-acts { display: flex; gap: rpx(8); }
 .plan-act {
-  padding: rpx(7) rpx(14);
+  flex: 1;
+  padding: rpx(7) 0;
   border-radius: 999rpx;
   font-size: rpx(20);
   font-weight: 700;
+  text-align: center;
 }
 .plan-act.cart { background: #f6f3ee; color: #6b625c; }
 .plan-act.buy { background: #251f1c; color: #fff; }
@@ -522,23 +551,55 @@ onMounted(() => {
 .shop-card {
   display: flex;
   align-items: center;
-  gap: rpx(12);
+  gap: rpx(16);
   padding: rpx(16);
   margin-top: rpx(10);
   border: 1rpx solid #ece7e0;
   border-radius: rpx(16);
   background: #fff;
+  cursor: pointer;
+  &:active { background: #faf8f4; }
+}
+.shop-logo {
+  flex: 0 0 rpx(96);
+  width: rpx(96);
+  height: rpx(96);
+  border-radius: rpx(12);
+  overflow: hidden;
+  background: #f4f1ed;
+  :deep(img) { width: 100%; height: 100%; object-fit: cover; }
 }
 .shop-main { flex: 1; min-width: 0; }
-.shop-name { font-size: rpx(25); font-weight: 700; color: #332c28; }
+.shop-name-line {
+  display: flex;
+  align-items: center;
+  gap: rpx(10);
+}
+.shop-name {
+  flex: 1;
+  min-width: 0;
+  font-size: rpx(25);
+  font-weight: 700;
+  color: #332c28;
+}
+.shop-rating { flex: none; color: #e0a13a; font-size: rpx(21); font-weight: 700; }
+.shop-addr {
+  margin-top: rpx(4);
+  font-size: rpx(20);
+  color: #a39a93;
+}
 .shop-meta {
   margin-top: rpx(6);
   display: flex;
+  align-items: center;
   gap: rpx(12);
   font-size: rpx(20);
   color: #a39a93;
 }
-.shop-rating { color: #e0a13a; }
+.shop-open {
+  color: #3f8f68;
+  &.closed { color: #b08a76; }
+}
 .shop-pick {
   flex: none;
   padding: rpx(8) rpx(16);
