@@ -15,6 +15,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { money } from '@/store'
+import { toast } from '@/utils/toast'
 
 const props = defineProps({
   product: { type: Object, required: true }
@@ -138,13 +139,6 @@ function copyLink() {
   }
 }
 
-const toastText = ref('')
-let toastTimer = null
-function toast(t) {
-  toastText.value = t
-  clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => { toastText.value = '' }, 1600)
-}
 
 onMounted(async () => {
   await genQr()

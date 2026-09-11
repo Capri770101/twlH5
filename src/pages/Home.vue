@@ -136,7 +136,7 @@
               <span class="flower-name">{{ item.name }}</span>
               <span class="flower-subtitle">{{ item.subtitle }}</span>
               <div class="flower-price-row">
-                <span class="flower-price">¥{{ item.priceText }}</span>
+                <span class="flower-price">¥{{ yuan(item.priceText) }}</span>
                 <span v-if="item.showOriginal" class="flower-original-price">¥{{ item.originalText }}</span>
               </div>
               <span v-if="item.sales > 0" class="flower-sales">已售{{ item.salesText }}</span>
@@ -153,9 +153,18 @@
       <div class="skeleton" :style="{ height: rpx(240), margin: rpx(16) + ' ' + rpx(24) }"></div>
     </div>
 
+    <!-- 加载失败：可重试（旧版裸 await 无 catch → 失败即永久骨架屏） -->
+    <StateBlock
+      v-else-if="loadError"
+      type="error"
+      emoji="😵"
+      :text="loadError"
+      hint="请检查网络后重试"
+      @retry="loadHome"
+    />
+
     <div class="tabbar-placeholder"></div>
 
-    <div v-if="toastText" class="twd-toast">{{ toastText }}</div>
   </div>
   <AddressManager v-model="showAddr" />
 
@@ -166,8 +175,10 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { getHomeIndex } from '@/mock/api'
 import FlowerImage from '@/components/FlowerImage.vue'
-import store from '@/store'
+import store, { yuan } from '@/store'
 import AddressManager from '@/components/AddressManager.vue'
+import StateBlock from '@/components/StateBlock.vue'
+import { toast } from '@/utils/toast'
 
 const router = useRouter()
 const rpx = n => `${n / 750}rem`
@@ -177,6 +188,7 @@ const categories = ref([])
 const nearbyShops = ref([])
 const recommendFlowers = ref([])
 const loading = ref(true)
+const loadError = ref('')
 const userAddress = computed(() => store.selectedAddress?.full || '请选择收货地址')
 const showAddr = ref(false)
 
@@ -184,14 +196,7 @@ const bannerRef = ref(null)
 const activeBanner = ref(0)
 let bannerTimer = null
 
-const toastText = ref('')
-let toastTimer = null
 
-function toast(text) {
-  toastText.value = text
-  clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => { toastText.value = '' }, 1600)
-}
 
 function bannerStyle(item) {
   return { background: `linear-gradient(135deg, ${item.color} 0%, ${item.color}88 100%)` }
@@ -223,13 +228,24 @@ function onBannerScroll(e) {
   if (i !== activeBanner.value) activeBanner.value = i
 }
 
-onMounted(async () => {
-  const data = await getHomeIndex()
-  banners.value = data.banners
-  categories.value = data.categories
-  nearbyShops.value = data.nearbyShops
-  recommendFlowers.value = data.recommendFlowers
-  loading.value = false
+async function loadHome() {
+  loading.value = true
+  loadError.value = ''
+  try {
+    const data = await getHomeIndex()
+    banners.value = data.banners || []
+    categories.value = data.categories || []
+    nearbyShops.value = data.nearbyShops || []
+    recommendFlowers.value = data.recommendFlowers || []
+  } catch (e) {
+    loadError.value = (e && e.message) || '首页数据加载失败'
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(() => {
+  loadHome()
 
   bannerTimer = setInterval(() => {
     const el = bannerRef.value
@@ -242,7 +258,6 @@ onMounted(async () => {
 
 onUnmounted(() => {
   clearInterval(bannerTimer)
-  clearTimeout(toastTimer)
 })
 </script>
 
@@ -581,19 +596,6 @@ onUnmounted(() => {
   height: rpx(120);
 }
 
-.twd-toast {
-  position: fixed;
-  left: 50%;
-  bottom: rpx(200);
-  transform: translateX(-50%);
-  padding: rpx(16) rpx(32);
-  border-radius: rpx(40);
-  background: rgba(0, 0, 0, 0.75);
-  color: #fff;
-  font-size: var(--fs-minor);
-  z-index: 200;
-  animation: fadeIn 0.2s ease-out;
-}
 
 /* AI 花艺顾问入口 */
 .ai-entry {

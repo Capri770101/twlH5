@@ -59,6 +59,10 @@
         <span class="m-left">❤️ 我的收藏</span>
         <span class="m-arrow">›</span>
       </li>
+      <li @click="router.push({ name: 'my-plans' })">
+        <span class="m-left">💐 我的方案</span>
+        <span class="m-arrow">›</span>
+      </li>
       <li @click="router.push({ name: 'my-coupons' })">
         <span class="m-left">🎫 我的优惠券</span>
         <span class="m-arrow">›</span>
@@ -74,6 +78,9 @@
     </ul>
 
     <button v-if="store.isLogged" class="logout-btn" @click="onLogout">退出登录</button>
+
+    <!-- 固定 TabBar 占位（防止退出登录按钮被底部导航挡住） -->
+    <div class="tabbar-placeholder"></div>
 
     <AddressManager v-model="visibleAddr" />
 
@@ -98,7 +105,6 @@
       <button class="sm-close" @click="showService = false">关闭</button>
     </div>
 
-    <div v-if="toastText" class="twd-toast">{{ toastText }}</div>
   </div>
 </template>
 
@@ -108,6 +114,7 @@ import { useRouter } from 'vue-router'
 import NavBar from '@/components/NavBar.vue'
 import AddressManager from '@/components/AddressManager.vue'
 import store, { logout } from '@/store'
+import { toast } from '@/utils/toast'
 
 const router = useRouter()
 const visibleAddr = ref(false)
@@ -152,13 +159,6 @@ function onLogout() {
   toast('已退出登录')
 }
 
-const toastText = ref('')
-let toastTimer = null
-function toast(text) {
-  toastText.value = text
-  clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => { toastText.value = '' }, 1600)
-}
 </script>
 
 <style lang="scss" scoped>
@@ -264,20 +264,12 @@ function toast(text) {
   box-shadow: var(--shadow-sm);
 }
 
-.twd-toast {
-  position: fixed;
-  left: 50%;
-  top: 45%;
-  transform: translateX(-50%);
-  background: rgba(0, 0, 0, 0.78);
-  color: #fff;
-  font-size: rpx(26);
-  padding: rpx(18) rpx(30);
-  border-radius: rpx(12);
-  z-index: 200;
-  max-width: rpx(560);
-  text-align: center;
+/* 固定 TabBar 占位（TabBar 高 100rpx + 底部安全区） */
+.tabbar-placeholder {
+  height: calc(#{rpx(120)} + constant(safe-area-inset-bottom));
+  height: calc(#{rpx(120)} + env(safe-area-inset-bottom));
 }
+
 
 /* 联系客服弹窗 */
 .service-modal {

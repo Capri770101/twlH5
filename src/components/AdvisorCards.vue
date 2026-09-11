@@ -14,7 +14,7 @@
               <span class="plan-stock" :class="{ out: p.stock <= 0 }">{{ p.stock > 0 ? '现货' : '暂缺' }}</span>
             </div>
             <div class="plan-foot">
-              <span class="plan-price">¥{{ p.priceText }}</span>
+              <span class="plan-price">¥{{ yuan(p.priceText) }}</span>
               <div class="plan-acts" @click.stop>
                 <span class="plan-act cart" @click="$emit('buy', { item: p, mode: 'cart' })">加购</span>
                 <span class="plan-act buy" @click="$emit('buy', { item: p, mode: 'now' })">下单</span>
@@ -125,7 +125,7 @@
         <div class="diy-body">
           <div class="diy-head">
             <div class="diy-name text-ellipsis">{{ diyPlan.name || 'DIY 方案' }}</div>
-            <div class="diy-price">¥{{ diyPlan.priceText }}</div>
+            <div class="diy-price">¥{{ yuan(diyPlan.priceText) }}</div>
           </div>
           <div v-if="diyPlan.desc" class="diy-desc">{{ diyPlan.desc }}</div>
 
@@ -196,6 +196,7 @@
 import { computed, ref, onMounted } from 'vue'
 import FlowerImage from '@/components/FlowerImage.vue'
 import { pollAgentTask, AGENT_CONFIG } from '@/mock/api'
+import { yuan } from '@/store'
 
 const props = defineProps({
   card: { type: Object, default: () => ({}) }

@@ -8,6 +8,9 @@ dist-*/
 # WorkBuddy 内部数据（迁移笔记等，非项目源码）
 .workbuddy/
 
+# 排查 .git 文件锁时产生的临时副本
+.git_fresh/
+
 # 系统/编辑器
 .DS_Store
 Thumbs.db

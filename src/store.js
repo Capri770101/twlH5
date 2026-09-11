@@ -76,6 +76,12 @@ export const groupedCart = computed(() => {
   return Array.from(map.values())
 })
 
+/** 数量按库存封顶（stock 为空/非法则不限制） */
+function capByStock(qty, stock) {
+  const s = Number(stock)
+  return (Number.isFinite(s) && s > 0) ? Math.min(qty, s) : qty
+}
+
 export function addToCart(product, quantity = 1) {
   const cart = state.cart
   const pShopId = product.shopId || state.shopId || ''
@@ -86,7 +92,7 @@ export function addToCart(product, quantity = 1) {
     (item.specId || '') === specId
   )
   if (exist) {
-    exist.quantity += quantity
+    exist.quantity = capByStock(exist.quantity + quantity, exist.stock ?? product.stock)
     if (product.shopName) exist.shopName = product.shopName
   } else {
     cart.push({
@@ -97,7 +103,7 @@ export function addToCart(product, quantity = 1) {
       price: product.price || 0,
       originalPrice: product.originalPrice || 0,
       stock: product.stock ?? null,
-      quantity,
+      quantity: capByStock(quantity, product.stock),
       shopId: pShopId,
       shopName: product.shopName || '',
       specId,
@@ -107,16 +113,20 @@ export function addToCart(product, quantity = 1) {
   persistCart()
 }
 
+/** 加减数量；超过库存返回 false（调用方可提示「已达库存上限」） */
 export function changeQuantity(id, shopId, delta, specId = '') {
   const item = state.cart.find(i =>
     i.id === id &&
     i.shopId === (shopId || 'default') &&
     (i.specId || '') === (specId || '')
   )
-  if (!item) return
-  item.quantity += delta
-  if (item.quantity < 1) item.quantity = 1
+  if (!item) return false
+  const next = item.quantity + delta
+  const stock = Number(item.stock)
+  if (delta > 0 && Number.isFinite(stock) && stock > 0 && next > stock) return false
+  item.quantity = Math.max(1, next)
   persistCart()
+  return true
 }
 
 export function removeFromCart(id, shopId, specId = '') {
@@ -181,6 +191,13 @@ export function selectAddress(addr) {
 export const money = fen => {
   const v = (fen || 0) / 100
   return Number.isInteger(v) ? String(v) : v.toFixed(2)
+}
+
+/** 元值展示归一：99.00 → 99，99.50 保留两位。用于把各处 priceText 显示风格统一成 money() 的效果 */
+export const yuan = v => {
+  const n = Number(v)
+  if (!Number.isFinite(n)) return String(v || '')
+  return Number.isInteger(n) ? String(n) : n.toFixed(2)
 }
 
 /* ============ 登录态管理 ============ */

@@ -12,8 +12,7 @@
     <div v-else class="fav-list">
       <div class="fav-item" v-for="item in favorites" :key="item.id" @click="goDetail(item)">
         <div class="fav-img">
-          <img v-if="isImageUrl(item.image)" :src="item.image" alt="" />
-          <span v-else class="fav-img-emoji">🌷</span>
+          <FlowerImage :src="isImageUrl(item.image) ? item.image : ''" emoji="🌷" />
         </div>
         <div class="fav-body">
           <div class="fav-name">{{ item.name }}</div>
@@ -27,7 +26,6 @@
       </div>
     </div>
 
-    <div v-if="toastText" class="twd-toast">{{ toastText }}</div>
   </div>
 </template>
 
@@ -35,7 +33,9 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import NavBar from '@/components/NavBar.vue'
+import FlowerImage from '@/components/FlowerImage.vue'
 import store, { addToCart, removeFavorite, money } from '@/store'
+import { toast } from '@/utils/toast'
 
 const router = useRouter()
 const favorites = store.favorites
@@ -55,13 +55,6 @@ function onRemove(item) {
   toast('已取消收藏')
 }
 
-const toastText = ref('')
-let toastTimer = null
-function toast(text) {
-  toastText.value = text
-  clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => { toastText.value = '' }, 1600)
-}
 </script>
 
 <style lang="scss" scoped>
@@ -139,16 +132,4 @@ function toast(text) {
 .fav-cart { background: var(--primary-gradient); color: #fff; }
 .fav-del { background: #f3efe9; color: var(--text-secondary); }
 
-.twd-toast {
-  position: fixed;
-  left: 50%;
-  top: 45%;
-  transform: translateX(-50%);
-  background: rgba(0, 0, 0, 0.78);
-  color: #fff;
-  font-size: rpx(26);
-  padding: rpx(18) rpx(30);
-  border-radius: rpx(12);
-  z-index: 200;
-}
 </style>

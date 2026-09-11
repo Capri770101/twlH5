@@ -84,7 +84,6 @@
       <span class="agree-link" @click.stop="openAgreement('privacy')">《隐私政策》</span>
     </div>
 
-    <div v-if="toastText" class="twd-toast">{{ toastText }}</div>
 
     <div v-if="showAgreement" class="modal-mask" @click="showAgreement = false">
       <div class="modal-content agreement-modal" @click.stop>
@@ -107,6 +106,7 @@ import {
   isWechatEnv, buildWechatAuthUrl, buildWechatPcAuthUrl, fetchAuthConfig,
   pcApprove, pcStatus, genPcTicket, WX_APPID
 } from '@/mock/api'
+import { toast } from '@/utils/toast'
 
 const route = useRoute()
 const router = useRouter()
@@ -119,13 +119,6 @@ const countdown = ref(60)
 const wechatEnv = isWechatEnv()
 let timer = null
 
-const toastText = ref('')
-let toastTimer = null
-function toast(text) {
-  toastText.value = text
-  clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => { toastText.value = '' }, 1600)
-}
 
 const phoneValid = computed(() => /^1[3-9]\d{9}$/.test(phone.value))
 const canPhoneLogin = computed(() => phoneValid.value && /^\d{6}$/.test(code.value))
@@ -364,7 +357,6 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (timer) clearInterval(timer)
-  clearTimeout(toastTimer)
   stopPcPoll()
 })
 </script>
@@ -668,18 +660,4 @@ onUnmounted(() => {
   font-size: rpx(30);
 }
 
-.twd-toast {
-  position: fixed;
-  left: 50%;
-  top: 45%;
-  transform: translateX(-50%);
-  background: rgba(0, 0, 0, 0.78);
-  color: #fff;
-  font-size: rpx(26);
-  padding: rpx(18) rpx(30);
-  border-radius: rpx(12);
-  z-index: 200;
-  max-width: rpx(560);
-  text-align: center;
-}
 </style>

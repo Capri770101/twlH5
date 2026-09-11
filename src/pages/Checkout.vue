@@ -78,14 +78,15 @@
         <div class="shop-header">
           <span class="shop-name">{{ group.shopName }}</span>
         </div>
-        <div v-for="product in group.items" :key="product.id" class="goods-item">
+        <div v-for="product in group.items" :key="product.id + '|' + (product.specId || '')" class="goods-item">
           <div class="goods-img">
             <FlowerImage :src="product.image" emoji="💐" />
           </div>
           <div class="goods-info">
             <span class="goods-name">{{ product.name }}</span>
-            <div v-if="product.subtitle" class="goods-specs">
-              <span>{{ product.subtitle }}</span>
+            <div v-if="product.specName || product.subtitle" class="goods-specs">
+              <span v-if="product.specName" class="goods-spec-chip">{{ product.specName }}</span>
+              <span v-if="product.subtitle">{{ product.subtitle }}</span>
             </div>
             <div class="goods-price-row">
               <span class="price price-sm">{{ money(product.price) }}</span>
@@ -93,10 +94,10 @@
                 <div
                   class="quantity-stepper-btn"
                   :class="{ disabled: product.quantity <= 1 }"
-                  @click.stop="changeQuantity(product.id, product.shopId, -1)"
+                  @click.stop="changeQuantity(product.id, product.shopId, -1, product.specId)"
                 >-</div>
                 <span class="quantity-stepper-value">{{ product.quantity }}</span>
-                <div class="quantity-stepper-btn" @click.stop="changeQuantity(product.id, product.shopId, 1)">+</div>
+                <div class="quantity-stepper-btn" @click.stop="changeQuantity(product.id, product.shopId, 1, product.specId)">+</div>
               </div>
             </div>
           </div>
@@ -291,7 +292,6 @@
       </div>
     </div>
 
-    <div v-if="toastText" class="twd-toast">{{ toastText }}</div>
   </div>
   <AddressManager v-model="showAddr" />
 
@@ -313,6 +313,7 @@ import { isWeChat, invokeWxPay } from '@/utils/wxpay'
 import NavBar from '@/components/NavBar.vue'
 import FlowerImage from '@/components/FlowerImage.vue'
 import AddressManager from '@/components/AddressManager.vue'
+import { toast } from '@/utils/toast'
 
 const router = useRouter()
 
@@ -351,7 +352,10 @@ const payAmount = computed(() => goodsTotalPrice.value - discountAmount.value)
 const canSubmit = computed(() => {
   if (!groupedCart.value.length || submitting.value) return false
   if (pickupMethod.value === 'delivery') return !!deliveryTime.value && !!store.selectedAddress
-  return !!pickupContactName.value && !!pickupContactPhone.value && !!pickupTime.value
+  // 自取：姓名非空 + 手机号格式校验（原先只判非空，填错也能提交）
+  return !!pickupContactName.value
+    && /^1[3-9]\d{9}$/.test(String(pickupContactPhone.value || '').trim())
+    && !!pickupTime.value
 })
 
 const timeModalTitle = computed(() =>
@@ -400,63 +404,64 @@ function confirmCard() {
 }
 
 async function onSubmit() {
+  if (submitting.value) return // 防重复点击
   if (!canSubmit.value) {
     toast(pickupMethod.value === 'delivery' ? '请选择配送时间' : '请填写取货人信息')
     return
   }
   submitting.value = true
-  const items = groupedCart.value.flatMap(g => g.items)
-  const firstShop = groupedCart.value[0] || {}
-  const res = await createOrder({
-    shopId: firstShop.shopId || 'default',
-    shopName: firstShop.shopName || '',
-    items,
-    totalPrice: payAmount.value,
-    address: store.selectedAddress,
-    expectDeliveryTime: pickupMethod.value === 'delivery' ? deliveryTime.value : pickupTime.value,
-    pickupMethod: pickupMethod.value,
-    pickupName: pickupContactName.value,
-    pickupPhone: pickupContactPhone.value,
-    cardContent: cardFinalContent.value,
-    remark: remark.value
-  })
-  const outTradeNo = res.id
-  const shopId = (groupedCart.value[0] && groupedCart.value[0].shopId) || 'default'
-  const amountFen = payAmount.value
-  const tradeType = isWeChat() ? 'JSAPI' : 'H5'
-  const openid = (store.userInfo && store.userInfo.openid) || ''
   try {
-    const pay = await payOrder({ shopId, outTradeNo, amountFen, description: '跳舞兰AI花店订单', openid, tradeType })
-    if (pay.tradeType === 'H5' && pay.h5_url) {
+    // 规格信息并入 subtitle 快照（后端 order_items 无独立 spec 列）
+    const items = groupedCart.value.flatMap(g => g.items).map(it => ({
+      ...it,
+      subtitle: [it.specName, it.subtitle].filter(Boolean).join(' · ')
+    }))
+    const firstShop = groupedCart.value[0] || {}
+    // ⚠️ 修复：createOrder 原先在 try 之外，创建失败时 submitting 永远 true → 按钮永久卡在「处理中…」
+    const res = await createOrder({
+      shopId: firstShop.shopId || 'default',
+      shopName: firstShop.shopName || '',
+      items,
+      totalPrice: payAmount.value,
+      address: store.selectedAddress,
+      expectDeliveryTime: pickupMethod.value === 'delivery' ? deliveryTime.value : pickupTime.value,
+      pickupMethod: pickupMethod.value,
+      pickupName: pickupContactName.value,
+      pickupPhone: pickupContactPhone.value,
+      cardContent: cardFinalContent.value,
+      remark: remark.value
+    })
+    const outTradeNo = res.id
+    const shopId = (groupedCart.value[0] && groupedCart.value[0].shopId) || 'default'
+    const amountFen = payAmount.value
+    const tradeType = isWeChat() ? 'JSAPI' : 'H5'
+    const openid = (store.userInfo && store.userInfo.openid) || ''
+    try {
+      const pay = await payOrder({ shopId, outTradeNo, amountFen, description: '跳舞兰AI花店订单', openid, tradeType })
+      if (pay.tradeType === 'H5' && pay.h5_url) {
+        clearCart()
+        location.href = pay.h5_url // 跳微信 App 收银台（外部浏览器）
+        return
+      }
+      if (pay.tradeType === 'JSAPI') {
+        await invokeWxPay(pay) // 微信内拉起收银台
+      }
       clearCart()
-      submitting.value = false
-      location.href = pay.h5_url // 跳微信 App 收银台（外部浏览器）
-      return
+      router.replace({ name: 'order-detail', params: { id: outTradeNo } })
+    } catch (e) {
+      // 支付未调起（如微信内缺 openid）：订单已建，引导去订单页稍后支付
+      clearCart()
+      toast('订单已创建，可稍后在订单页完成支付')
+      router.replace({ name: 'order-detail', params: { id: outTradeNo } })
     }
-    if (pay.tradeType === 'JSAPI') {
-      await invokeWxPay(pay) // 微信内拉起收银台
-    }
-    clearCart()
-    submitting.value = false
-    router.replace({ name: 'order-detail', params: { id: outTradeNo } })
   } catch (e) {
-    // 支付未调起（如微信内缺 openid）：订单已建，引导去订单页稍后支付
-    clearCart()
-    submitting.value = false
-    toast('订单已创建，可稍后在订单页完成支付')
-    router.replace({ name: 'order-detail', params: { id: outTradeNo } })
+    toast((e && e.message) || '下单失败，请重试')
+  } finally {
+    submitting.value = false // 无论成功失败都解锁按钮
   }
 }
 
-const toastText = ref('')
-let toastTimer = null
-function toast(text) {
-  toastText.value = text
-  clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => { toastText.value = '' }, 1600)
-}
 
-onUnmounted(() => clearTimeout(toastTimer))
 </script>
 
 <style lang="scss" scoped>
@@ -674,10 +679,21 @@ onUnmounted(() => clearTimeout(toastTimer))
   font-size: var(--fs-minor);
   color: #8d827c;
   background: #f7f5f2;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: rpx(8);
   align-self: flex-start;
   padding: rpx(2) rpx(12);
   border-radius: rpx(4);
+}
+.goods-spec-chip {
+  color: var(--primary);
+  font-weight: 600;
+}
+.goods-spec-chip + span::before {
+  content: '·';
+  margin-right: rpx(8);
+  color: #c9c0ba;
 }
 .goods-price-row {
   display: flex;
@@ -1190,17 +1206,4 @@ onUnmounted(() => clearTimeout(toastTimer))
   background: #fff8f0;
 }
 
-.twd-toast {
-  position: fixed;
-  left: 50%;
-  bottom: rpx(220);
-  transform: translateX(-50%);
-  padding: rpx(16) rpx(32);
-  border-radius: rpx(40);
-  background: rgba(0, 0, 0, 0.75);
-  color: #fff;
-  font-size: var(--fs-minor);
-  z-index: 1200;
-  animation: fadeIn 0.2s ease-out;
-}
 </style>

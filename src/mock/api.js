@@ -88,8 +88,25 @@ export async function queryPayOrder(outTradeNo, subMchid) {
 }
 
 
+// ===== 轻量 TTL 缓存：分类/店铺这类低频变化的数据，避免每次进页都重拉 =====
+const _ttlCache = new Map()
+function cached(key, ttlMs, loader) {
+  const hit = _ttlCache.get(key)
+  const now = Date.now()
+  if (hit && now - hit.at < ttlMs) return hit.promise
+  const promise = Promise.resolve()
+    .then(loader)
+    .catch(err => { _ttlCache.delete(key); throw err }) // 失败不缓存，下次可重试
+  _ttlCache.set(key, { at: now, promise })
+  return promise
+}
+
 // ===== 首页 =====
-export async function getHomeIndex() {
+export function getHomeIndex() {
+  return cached('home', 60 * 1000, getHomeIndexReal)
+}
+
+async function getHomeIndexReal() {
   if (REAL_API_ENABLED) {
     try { return await realApi('/home') } catch (e) { console.warn('[api] /home 真实接口失败，回退 mock：', e && e.message) }
   }
@@ -136,12 +153,14 @@ export async function getFlowerDetail(id) {
 }
 
 // ===== 分类 =====
-export async function getCategories() {
-  if (REAL_API_ENABLED) {
-    try { return await realApi('/categories') } catch (e) { console.warn('[api] /categories 真实接口失败，回退 mock：', e && e.message) }
-  }
-  await delay(80)
-  return mockData.categories
+export function getCategories() {
+  return cached('categories', 5 * 60 * 1000, async () => {
+    if (REAL_API_ENABLED) {
+      try { return await realApi('/categories') } catch (e) { console.warn('[api] /categories 真实接口失败，回退 mock：', e && e.message) }
+    }
+    await delay(80)
+    return mockData.categories
+  })
 }
 
 // ===== 花束列表（分类/排序/分页复用） =====
@@ -516,12 +535,14 @@ export async function getProductReviews(productId) {
 }
 
 // 全部店铺列表（首页「更多花店」入口）
-export async function getShopList() {
-  if (REAL_API_ENABLED) {
-    try { return await realApi('/shops') } catch (e) { console.warn('[api] /shops 真实接口失败，回退 mock：', e && e.message) }
-  }
-  await delay(140)
-  return mockData.shops
+export function getShopList() {
+  return cached('shops', 5 * 60 * 1000, async () => {
+    if (REAL_API_ENABLED) {
+      try { return await realApi('/shops') } catch (e) { console.warn('[api] /shops 真实接口失败，回退 mock：', e && e.message) }
+    }
+    await delay(140)
+    return mockData.shops
+  })
 }
 
 export async function searchAll(keyword) {

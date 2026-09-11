@@ -47,11 +47,15 @@
         </div>
 
         <div v-if="order.status === 'new'" class="order-actions">
-          <button class="btn btn-outline btn-sm" @click.stop="onCancel(order)">取消订单</button>
-          <button class="btn btn-primary btn-sm" @click.stop="onPay(order)">去支付</button>
+          <button class="btn btn-outline btn-sm" :disabled="actingId === order.id" @click.stop="onCancel(order)">
+            {{ actingId === order.id ? '处理中…' : '取消订单' }}
+          </button>
+          <button class="btn btn-primary btn-sm" :disabled="actingId === order.id" @click.stop="onPay(order)">
+            {{ actingId === order.id ? '处理中…' : '去支付' }}
+          </button>
         </div>
         <div v-else-if="order.status === 'completed'" class="order-actions">
-          <button v-if="!order._hasReview" class="btn btn-outline btn-sm" @click.stop="toast('评价页开发中')">去评价</button>
+          <button v-if="!order._hasReview" class="btn btn-outline btn-sm" @click.stop="goReview(order.id)">去评价</button>
           <button class="btn btn-primary btn-sm" @click.stop="repeatOrder(order)">再来一单</button>
         </div>
         <div v-else-if="!['refunding', 'refunded', 'refund_failed', 'cancelled'].includes(order.status)" class="order-actions">
@@ -65,7 +69,7 @@
     </div>
 
     <!-- 空状态 -->
-    <div v-if="!orders.length && !loading" class="empty-state">
+    <div v-if="!orders.length && !loading && !loadError" class="empty-state">
       <span class="empty-icon">📋</span>
       <span class="empty-text">暂无相关订单</span>
       <button class="btn btn-primary empty-btn" @click="router.push({ name: 'home' })">去逛逛</button>
@@ -76,7 +80,16 @@
       <div v-for="n in 3" :key="n" class="skeleton" :style="{ height: rpx(200), margin: rpx(16) + ' ' + rpx(24) }"></div>
     </div>
 
-    <div v-if="toastText" class="twd-toast">{{ toastText }}</div>
+    <!-- 加载失败：可重试（未登录/网络异常时给出明确出口） -->
+    <StateBlock
+      v-if="!loading && loadError"
+      type="error"
+      emoji="😵"
+      :text="loadError"
+      hint="请检查网络或重新登录后重试"
+      @retry="load"
+    />
+
 
     <RefundDialog v-model:visible="showRefund" :order="refundTarget" @success="onRefundSuccess" @error="toast" />
   </div>
@@ -91,6 +104,8 @@ import { isWeChat, invokeWxPay } from '@/utils/wxpay'
 import NavBar from '@/components/NavBar.vue'
 import FlowerImage from '@/components/FlowerImage.vue'
 import RefundDialog from '@/components/RefundDialog.vue'
+import StateBlock from '@/components/StateBlock.vue'
+import { toast } from '@/utils/toast'
 
 const route = useRoute()
 const router = useRouter()
@@ -110,11 +125,20 @@ const tabs = [
 const activeTab = ref(route.query.tab || 'all')
 const orders = ref([])
 const loading = ref(true)
+const loadError = ref('')
 
 async function load() {
   loading.value = true
-  orders.value = await getOrderList(activeTab.value)
-  loading.value = false
+  loadError.value = ''
+  try {
+    orders.value = await getOrderList(activeTab.value)
+    if (!orders.value) orders.value = []
+  } catch (e) {
+    orders.value = []
+    loadError.value = (e && e.message) || '订单列表加载失败'
+  } finally {
+    loading.value = false
+  }
 }
 
 function onTabChange(value) {
@@ -124,6 +148,10 @@ function onTabChange(value) {
 
 function goDetail(id) {
   router.push({ name: 'order-detail', params: { id } })
+}
+
+function goReview(id) {
+  router.push({ name: 'review', params: { orderId: id } })
 }
 
 function repeatOrder(order) {
@@ -143,23 +171,29 @@ function repeatOrder(order) {
   setTimeout(() => router.push({ name: 'cart' }), 300)
 }
 
-// 待付款订单：取消（真实后端落库）
+// 待付款订单：取消（真实后端落库）。acting 防重复点击
+const actingId = ref('')
 async function onCancel(order) {
-  if (!order) return
+  if (!order || actingId.value) return
+  if (!window.confirm('确定取消这笔订单吗？')) return
+  actingId.value = order.id
   try {
     await cancelOrder(order.id)
     toast('已取消')
     load()
   } catch (e) {
     toast((e && e.message) || '取消失败')
+  } finally {
+    actingId.value = ''
   }
 }
 
 // 待付款订单：重新拉起支付（微信内 JSAPI / 外部浏览器跳 H5 收银台）
 async function onPay(order) {
-  if (!order) return
+  if (!order || actingId.value) return
   const openid = ''
   const tradeType = isWeChat() ? 'JSAPI' : 'H5'
+  actingId.value = order.id
   try {
     const pay = await payOrder({
       shopId: order.shopId || 'default',
@@ -181,16 +215,11 @@ async function onPay(order) {
     toast('支付暂不可用，请稍后重试')
   } catch (e) {
     toast('支付未完成，可稍后重试')
+  } finally {
+    actingId.value = ''
   }
 }
 
-const toastText = ref('')
-let toastTimer = null
-function toast(text) {
-  toastText.value = text
-  clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => { toastText.value = '' }, 1600)
-}
 
 const showRefund = ref(false)
 const refundTarget = ref(null)
@@ -205,7 +234,6 @@ function onRefundSuccess() {
 }
 
 onMounted(load)
-onUnmounted(() => clearTimeout(toastTimer))
 </script>
 
 <style lang="scss" scoped>
@@ -393,17 +421,4 @@ onUnmounted(() => clearTimeout(toastTimer))
   color: #FF9500;
 }
 
-.twd-toast {
-  position: fixed;
-  left: 50%;
-  bottom: rpx(120);
-  transform: translateX(-50%);
-  padding: rpx(16) rpx(32);
-  border-radius: rpx(40);
-  background: rgba(0, 0, 0, 0.75);
-  color: #fff;
-  font-size: var(--fs-minor);
-  z-index: 200;
-  animation: fadeIn 0.2s ease-out;
-}
 </style>

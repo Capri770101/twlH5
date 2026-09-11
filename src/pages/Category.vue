@@ -131,13 +131,27 @@
       </div>
     </div>
 
-    <!-- 加载更多 -->
-    <div v-if="hasMore && !loading" class="load-more">
-      <span class="load-text">上拉加载更多...</span>
+    <!-- 加载更多（滚动哨兵：滚到底自动加载下一页） -->
+    <div ref="sentinelRef" class="load-sentinel"></div>
+    <div v-if="loadingMore" class="load-more">
+      <span class="load-text">正在加载…</span>
     </div>
-    <div v-else-if="!hasMore && flowers.length" class="load-more">
+    <div v-else-if="hasMore && !loading" class="load-more">
+      <span class="load-text" @click="loadMore">上拉或点击加载更多…</span>
+    </div>
+    <div v-else-if="!hasMore && flowers.length && !loading" class="load-more">
       <span class="load-text">—— 已经到底了 ——</span>
     </div>
+
+    <!-- 加载失败：可重试 -->
+    <StateBlock
+      v-if="loadError"
+      type="error"
+      emoji="😵"
+      :text="loadError"
+      hint="请检查网络后重试"
+      @retry="reload"
+    />
 
     <!-- 骨架屏 -->
     <div v-if="loading" class="skeleton-grid">
@@ -156,7 +170,6 @@
     </div>
 
     <div class="tabbar-placeholder"></div>
-    <div v-if="toastText" class="twd-toast">{{ toastText }}</div>
   </div>
 </template>
 
@@ -166,7 +179,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { getCategories, getFlowerList, searchAll } from '@/mock/api'
 import { addToCart, money } from '@/store'
 import NavBar from '@/components/NavBar.vue'
+import StateBlock from '@/components/StateBlock.vue'
 import FlowerImage from '@/components/FlowerImage.vue'
+import { toast } from '@/utils/toast'
 
 const route = useRoute()
 const router = useRouter()
@@ -184,13 +199,6 @@ const searchFocused = ref(false)
 const searchKeyword = ref('')
 const inputRef = ref(null)
 
-const toastText = ref('')
-let toastTimer = null
-function toast(text) {
-  toastText.value = text
-  clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => { toastText.value = '' }, 1600)
-}
 
 function flowerEmoji(item) {
   const map = {
@@ -200,21 +208,68 @@ function flowerEmoji(item) {
   return map[item.categoryId] || '🌷'
 }
 
+const PAGE_SIZE = 10
+const page = ref(1)
+const loadingMore = ref(false)
+const loadError = ref('')
+const sentinelRef = ref(null)
+let io = null
+
+// 加载第 1 页（切换分类/排序时调用）
 async function loadFlowers() {
   loading.value = true
-  const res = await getFlowerList({ categoryId: activeCategory.value, sort: sortType.value })
-  flowers.value = res.list
-  hasMore.value = res.hasMore
-  loading.value = false
+  loadError.value = ''
+  page.value = 1
+  try {
+    const res = await getFlowerList({ categoryId: activeCategory.value, sort: sortType.value, page: 1, pageSize: PAGE_SIZE })
+    flowers.value = res.list || []
+    hasMore.value = !!res.hasMore
+  } catch (e) {
+    flowers.value = []
+    hasMore.value = false
+    loadError.value = (e && e.message) || '商品列表加载失败'
+  } finally {
+    loading.value = false
+  }
+}
+
+// 加载下一页（滚动哨兵触发；真实分页，旧版只有死提示）
+async function loadMore() {
+  if (loading.value || loadingMore.value || !hasMore.value) return
+  loadingMore.value = true
+  const next = page.value + 1
+  try {
+    const res = await getFlowerList({ categoryId: activeCategory.value, sort: sortType.value, page: next, pageSize: PAGE_SIZE })
+    const list = res.list || []
+    flowers.value = flowers.value.concat(list)
+    hasMore.value = !!res.hasMore
+    page.value = next
+  } catch (e) {
+    toast('加载更多失败，请重试')
+  } finally {
+    loadingMore.value = false
+  }
+}
+
+function reload() {
+  loadFlowers()
 }
 
 async function loadSearch() {
   loading.value = true
-  const res = await searchAll(searchKeyword.value)
-  flowers.value = res.flowers
-  shops.value = res.shops
-  hasMore.value = false
-  loading.value = false
+  loadError.value = ''
+  try {
+    const res = await searchAll(searchKeyword.value)
+    flowers.value = res.flowers
+    shops.value = res.shops
+    hasMore.value = false
+  } catch (e) {
+    flowers.value = []
+    shops.value = []
+    loadError.value = (e && e.message) || '搜索失败'
+  } finally {
+    loading.value = false
+  }
 }
 
 function onCategoryChange(id) {
@@ -233,9 +288,13 @@ function goShop(shop) {
   router.push({ name: 'shop-detail', params: { id: shop.id } })
 }
 
+const addingId = ref('')
 function onAddCart(item) {
+  if (addingId.value) return // 防连点重复加购
+  addingId.value = item.id
   addToCart(item, 1)
   toast('已加入购物车')
+  setTimeout(() => { addingId.value = '' }, 600)
 }
 
 function onSearchConfirm() {
@@ -259,11 +318,25 @@ watch(searchFocused, async val => {
 })
 
 onMounted(async () => {
-  categories.value = await getCategories()
+  try {
+    categories.value = await getCategories()
+  } catch (e) {
+    categories.value = [] // 分类拉取失败不阻断列表
+  }
   await loadFlowers()
+  // 滚动到底自动加载下一页
+  if (typeof IntersectionObserver !== 'undefined' && sentinelRef.value) {
+    io = new IntersectionObserver(entries => {
+      if (entries[0] && entries[0].isIntersecting) loadMore()
+    }, { rootMargin: '200px' })
+    io.observe(sentinelRef.value)
+  }
 })
 
-onUnmounted(() => clearTimeout(toastTimer))
+onUnmounted(() => {
+  if (io) { io.disconnect(); io = null }
+})
+
 </script>
 
 <style lang="scss" scoped>
@@ -463,6 +536,7 @@ onUnmounted(() => clearTimeout(toastTimer))
 }
 
 /* 加载更多 */
+.load-sentinel { height: rpx(20); }
 .load-more {
   text-align: center;
   padding: rpx(32) 0;
@@ -610,17 +684,4 @@ onUnmounted(() => clearTimeout(toastTimer))
   height: rpx(40);
 }
 
-.twd-toast {
-  position: fixed;
-  left: 50%;
-  bottom: rpx(220);
-  transform: translateX(-50%);
-  padding: rpx(16) rpx(32);
-  border-radius: rpx(40);
-  background: rgba(0, 0, 0, 0.75);
-  color: #fff;
-  font-size: var(--fs-minor);
-  z-index: 200;
-  animation: fadeIn 0.2s ease-out;
-}
 </style>

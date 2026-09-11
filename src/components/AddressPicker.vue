@@ -85,7 +85,6 @@
 
         <!-- 轻提示 -->
         <transition name="fade">
-          <div v-if="tmsg" class="mini-toast">{{ tmsg }}</div>
         </transition>
       </div>
     </div>
@@ -95,6 +94,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { provinces, getCities, getDistricts } from '@/mock/regions'
+import { toast } from '@/utils/toast'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -107,8 +107,6 @@ const pi = ref(0)
 const ci = ref(0)
 const di = ref(0)
 const form = ref({ name: '', phone: '', detail: '', isDefault: false })
-const tmsg = ref('')
-let tt = null
 
 const province = computed(() => provinces[pi.value])
 const cityList = computed(() => getCities(province.value?.code))
@@ -159,11 +157,6 @@ function close() {
   emit('update:modelValue', false)
 }
 
-function toast(m) {
-  tmsg.value = m
-  clearTimeout(tt)
-  tt = setTimeout(() => (tmsg.value = ''), 1800)
-}
 
 function reset() {
   step.value = 1

@@ -53,7 +53,7 @@
                 <span class="flower-name">{{ item.name }}</span>
                 <span class="flower-subtitle">{{ item.subtitle }}</span>
                 <div class="flower-price-row">
-                  <span class="flower-price">¥{{ item.priceText }}</span>
+                  <span class="flower-price">¥{{ yuan(item.priceText) }}</span>
                   <span v-if="item.showOriginal" class="flower-original-price">¥{{ item.originalText }}</span>
                 </div>
                 <span class="flower-sales">已售{{ item.salesText }}</span>
@@ -91,7 +91,6 @@
       </div>
     </div>
 
-    <div v-if="toastText" class="twd-toast">{{ toastText }}</div>
   </div>
 </template>
 
@@ -100,6 +99,8 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { searchAll } from '@/mock/api'
 import FlowerImage from '@/components/FlowerImage.vue'
+import { toast } from '@/utils/toast'
+import { yuan } from '@/store'
 
 const router = useRouter()
 const rpx = n => `${n / 750}rem`
@@ -169,13 +170,6 @@ function toShop(id) {
   router.push({ name: 'shop-detail', params: { id } })
 }
 
-const toastText = ref('')
-let toastTimer = null
-function toast(t) {
-  toastText.value = t
-  clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => { toastText.value = '' }, 1600)
-}
 
 onMounted(() => {
   inputRef.value && inputRef.value.focus()
@@ -477,16 +471,4 @@ onMounted(() => {
   100% { background-position: 0 0; }
 }
 
-.twd-toast {
-  position: fixed;
-  left: 50%;
-  bottom: rpx(200);
-  transform: translateX(-50%);
-  padding: rpx(16) rpx(32);
-  border-radius: rpx(40);
-  background: rgba(0, 0, 0, 0.75);
-  color: #fff;
-  font-size: var(--fs-minor);
-  z-index: 200;
-}
 </style>

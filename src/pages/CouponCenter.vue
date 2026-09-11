@@ -25,7 +25,6 @@
       当前为本地版（领取/展示均在本地），正式核销待后端券接口上线。
     </div>
 
-    <div v-if="toastText" class="twd-toast">{{ toastText }}</div>
   </div>
 </template>
 
@@ -33,6 +32,7 @@
 import { ref } from 'vue'
 import NavBar from '@/components/NavBar.vue'
 import { COUPON_TEMPLATES, claimCoupon, isCouponClaimed, money } from '@/store'
+import { toast } from '@/utils/toast'
 
 const templates = COUPON_TEMPLATES
 
@@ -44,13 +44,6 @@ function claim(id) {
   else toast('该券已领取')
 }
 
-const toastText = ref('')
-let toastTimer = null
-function toast(t) {
-  toastText.value = t
-  clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => { toastText.value = '' }, 1600)
-}
 </script>
 
 <style lang="scss" scoped>
@@ -118,19 +111,5 @@ function toast(t) {
   font-size: rpx(22);
   color: var(--text-light);
   line-height: 1.7;
-}
-.twd-toast {
-  position: fixed;
-  left: 50%;
-  top: 45%;
-  transform: translateX(-50%);
-  background: rgba(0, 0, 0, 0.78);
-  color: #fff;
-  font-size: rpx(26);
-  padding: rpx(18) rpx(30);
-  border-radius: rpx(12);
-  z-index: 200;
-  max-width: rpx(560);
-  text-align: center;
 }
 </style>

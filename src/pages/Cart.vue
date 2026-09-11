@@ -12,15 +12,16 @@
           </div>
 
           <div class="shop-items">
-            <div v-for="product in group.items" :key="product.id" class="cart-item">
+            <div v-for="product in group.items" :key="product.id + '|' + (product.specId || '')" class="cart-item">
               <div class="cart-img">
                 <FlowerImage :src="product.image" emoji="💐" />
               </div>
 
               <div class="cart-info">
                 <span class="cart-name">{{ product.name }}</span>
-                <div v-if="product.subtitle" class="cart-specs">
-                  <span>{{ product.subtitle }}</span>
+                <div v-if="product.specName || product.subtitle" class="cart-specs">
+                  <span v-if="product.specName" class="cart-spec-chip">{{ product.specName }}</span>
+                  <span v-if="product.subtitle">{{ product.subtitle }}</span>
                 </div>
                 <div class="cart-price-row">
                   <span class="price price-sm">{{ money(product.price) }}</span>
@@ -32,17 +33,17 @@
                   <button
                     class="qty-btn minus"
                     :class="{ disabled: product.quantity <= 1 }"
-                    @click="changeQuantity(product.id, product.shopId, -1)"
+                    @click="onQtyChange(product.id, product.shopId, -1, product.specId)"
                   >−</button>
                   <span class="qty-num">{{ product.quantity }}</span>
                   <button
                     class="qty-btn plus"
-                    @click="changeQuantity(product.id, product.shopId, 1)"
+                    @click="onQtyChange(product.id, product.shopId, 1, product.specId)"
                   >+</button>
                 </div>
               </div>
 
-              <button class="cart-delete" @click="removeFromCart(product.id, product.shopId)">
+              <button class="cart-delete" @click="onRemove(product.id, product.shopId, product.specId)">
                 <span>🗑</span>
               </button>
             </div>
@@ -73,7 +74,6 @@
     </div>
 
     <div class="tabbar-placeholder"></div>
-    <div v-if="toastText" class="twd-toast">{{ toastText }}</div>
   </div>
 </template>
 
@@ -90,6 +90,7 @@ import state, {
 } from '@/store'
 import NavBar from '@/components/NavBar.vue'
 import FlowerImage from '@/components/FlowerImage.vue'
+import { toast } from '@/utils/toast'
 
 const router = useRouter()
 
@@ -97,15 +98,19 @@ function toShop(id) {
   if (id && id !== 'default') router.push({ name: 'shop-detail', params: { id } })
 }
 
-const toastText = ref('')
-let toastTimer = null
-function toast(text) {
-  toastText.value = text
-  clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => { toastText.value = '' }, 1600)
+// 加减数量：超出库存给出提示（store 返回 false）
+function onQtyChange(id, shopId, delta, specId) {
+  const ok = changeQuantity(id, shopId, delta, specId)
+  if (ok === false && delta > 0) toast('已达该商品库存上限')
 }
 
-onUnmounted(() => clearTimeout(toastTimer))
+// 删除商品二次确认，避免误触
+function onRemove(id, shopId, specId) {
+  if (!window.confirm('确定从购物车移除这个商品吗？')) return
+  removeFromCart(id, shopId, specId)
+}
+
+
 </script>
 
 <style lang="scss" scoped>
@@ -197,10 +202,21 @@ onUnmounted(() => clearTimeout(toastTimer))
   font-size: var(--fs-minor);
   color: #999;
   background: #f5f5f5;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: rpx(8);
   align-self: flex-start;
   padding: rpx(4) rpx(12);
   border-radius: rpx(4);
+}
+.cart-spec-chip {
+  color: var(--primary);
+  font-weight: 600;
+}
+.cart-spec-chip + span::before {
+  content: '·';
+  margin-right: rpx(8);
+  color: #ccc;
 }
 .cart-price-row {
   display: flex;
@@ -294,17 +310,4 @@ onUnmounted(() => clearTimeout(toastTimer))
   height: rpx(120);
 }
 
-.twd-toast {
-  position: fixed;
-  left: 50%;
-  bottom: rpx(220);
-  transform: translateX(-50%);
-  padding: rpx(16) rpx(32);
-  border-radius: rpx(40);
-  background: rgba(0, 0, 0, 0.75);
-  color: #fff;
-  font-size: var(--fs-minor);
-  z-index: 200;
-  animation: fadeIn 0.2s ease-out;
-}
 </style>

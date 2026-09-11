@@ -1,7 +1,24 @@
 <template>
-  <div class="page twd-app shop-detail" v-if="shop">
-    <NavBar :title="shop.name" />
+  <div class="page twd-app shop-detail">
+    <!-- NavBar 始终渲染：加载失败/店铺不存在时也能返回（旧版 v-if="shop" 会连返回按钮一起吞掉） -->
+    <NavBar :title="shop ? shop.name : '店铺详情'" />
 
+    <!-- 加载中 -->
+    <StateBlock v-if="loading" type="loading" text="正在加载店铺…" />
+
+    <!-- 加载失败：可重试 / 可返回 -->
+    <StateBlock
+      v-else-if="loadError"
+      type="error"
+      emoji="😵"
+      :text="loadError"
+      hint="请检查网络后重试"
+      show-back
+      @retry="loadShop"
+      @back="router.back()"
+    />
+
+    <template v-else-if="shop">
     <!-- ===== Hero ===== -->
     <div class="hero">
       <div class="hero-cover">
@@ -167,8 +184,12 @@
       </div>
     </div>
 
-    <!-- ===== 底部操作栏（上抬至 TabBar 之上） ===== -->
-    <div class="fixed-bottom shop-bar" :style="{ bottom: 'calc(100 * var(--rpx) + env(safe-area-inset-bottom))' }">
+    <!-- ===== 底部操作栏：本页无 TabBar → 贴底；有 TabBar 的页面才上抬 100rpx ===== -->
+    <div
+      v-if="shop"
+      class="fixed-bottom shop-bar"
+      :style="{ bottom: barBottom }"
+    >
       <div class="shop-bar-cart" @click="goCart">
         <span class="cart-ico">🛒</span>
         <span v-if="cartCount" class="cart-badge">{{ cartCount }}</span>
@@ -181,6 +202,7 @@
     <transition name="fade">
       <div v-if="toastMsg" class="toast">{{ toastMsg }}</div>
     </transition>
+    </template>
   </div>
 </template>
 
@@ -191,6 +213,7 @@ import { getShopDetail, getShopReviews } from '@/mock/api'
 import { addToCart, cartCount, totalPrice, money } from '@/store'
 import FlowerImage from '@/components/FlowerImage.vue'
 import NavBar from '@/components/NavBar.vue'
+import StateBlock from '@/components/StateBlock.vue'
 import GoodsCard from '@/components/GoodsCard.vue'
 
 const route = useRoute()
@@ -264,22 +287,48 @@ function goCart() {
 async function loadReviews() {
   activeTab.value = 'reviews'
   if (reviews.value.length) return
-  reviews.value = await getShopReviews(shop.value.id)
+  try {
+    reviews.value = await getShopReviews(shop.value.id)
+  } catch (e) {
+    reviews.value = [] // 评价拉取失败不阻断页面
+    showToast('评价加载失败')
+  }
 }
 
-onMounted(async () => {
-  const data = await getShopDetail(route.params.id)
-  if (!data) { showToast('店铺不存在'); return }
-  shop.value = data.shop
-  flowers.value = data.flowers
-  featured.value = data.featured
-  categories.value = data.categories
-  document.title = data.shop.name
-  if (featured.value.length > 1) {
-    featuredTimer = setInterval(() => {
-      featuredIndex.value = (featuredIndex.value + 1) % featured.value.length
-    }, 3500)
+const loading = ref(true)
+const loadError = ref('')
+const hasTabBar = computed(() => !!(route.meta && route.meta.tab))
+// 有 TabBar 的页面把底部栏抬到 TabBar 之上；本页无 TabBar → 直接贴底（旧版固定抬 100rpx 会悬空留白）
+const barBottom = computed(() => hasTabBar.value
+  ? 'calc(100 * var(--rpx) + env(safe-area-inset-bottom))'
+  : 'env(safe-area-inset-bottom)')
+
+async function loadShop() {
+  loading.value = true
+  loadError.value = ''
+  try {
+    const data = await getShopDetail(route.params.id)
+    if (!data || !data.shop) { loadError.value = '店铺不存在或已下线'; return }
+    shop.value = data.shop
+    flowers.value = data.flowers || []
+    featured.value = data.featured || []
+    categories.value = data.categories || []
+    document.title = data.shop.name
+    if (featured.value.length > 1) {
+      clearInterval(featuredTimer)
+      featuredTimer = setInterval(() => {
+        featuredIndex.value = (featuredIndex.value + 1) % featured.value.length
+      }, 3500)
+    }
+  } catch (e) {
+    loadError.value = (e && e.message) || '店铺信息加载失败'
+  } finally {
+    loading.value = false
   }
+}
+
+onMounted(() => {
+  loadShop()
 })
 
 onUnmounted(() => {
@@ -289,7 +338,7 @@ onUnmounted(() => {
 </script>
 
 <style scoped lang="scss">
-.shop-detail { padding-bottom: calc(200rpx + env(safe-area-inset-bottom)); background: var(--bg); }
+.shop-detail { padding-bottom: calc(160rpx + env(safe-area-inset-bottom)); background: var(--bg); }
 
 /* ===== Hero ===== */
 .hero { position: relative; }

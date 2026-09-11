@@ -136,25 +136,26 @@
         <template v-else>
           <span class="section-title">评价本次订单</span>
           <span class="review-entry-desc">分享花材、包装、配送或服务体验</span>
-          <button class="review-entry-button" @click="toast('评价页开发中')">去评价</button>
+          <button class="review-entry-button" @click="goReview">去评价</button>
         </template>
       </div>
     </template>
 
-    <div v-if="toastText" class="twd-toast">{{ toastText }}</div>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { getOrderDetail } from '@/mock/api'
 import { money } from '@/store'
 import NavBar from '@/components/NavBar.vue'
 import FlowerImage from '@/components/FlowerImage.vue'
 import RefundDialog from '@/components/RefundDialog.vue'
+import { toast } from '@/utils/toast'
 
 const route = useRoute()
+const router = useRouter()
 const rpx = n => `${n / 750}rem`
 
 const order = ref(null)
@@ -200,13 +201,11 @@ function callRider() {
   else toast('暂未获取到骑手电话')
 }
 
-const toastText = ref('')
-let toastTimer = null
-function toast(text) {
-  toastText.value = text
-  clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => { toastText.value = '' }, 1600)
+function goReview() {
+  if (!order.value) return
+  router.push({ name: 'review', params: { orderId: order.value.id } })
 }
+
 
 const showRefund = ref(false)
 function onRefundSuccess() {
@@ -221,7 +220,6 @@ onMounted(async () => {
   loading.value = false
 })
 
-onUnmounted(() => clearTimeout(toastTimer))
 </script>
 
 <style lang="scss" scoped>
@@ -479,17 +477,4 @@ onUnmounted(() => clearTimeout(toastTimer))
   padding-top: rpx(16);
 }
 
-.twd-toast {
-  position: fixed;
-  left: 50%;
-  bottom: rpx(120);
-  transform: translateX(-50%);
-  padding: rpx(16) rpx(32);
-  border-radius: rpx(40);
-  background: rgba(0, 0, 0, 0.75);
-  color: #fff;
-  font-size: var(--fs-minor);
-  z-index: 200;
-  animation: fadeIn 0.2s ease-out;
-}
 </style>

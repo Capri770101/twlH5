@@ -6,6 +6,15 @@
       <div v-for="n in 4" :key="n" class="skeleton" :style="{ height: rpx(220), margin: rpx(16) + ' ' + rpx(24) }"></div>
     </div>
 
+    <StateBlock
+      v-if="!loading && loadError"
+      type="error"
+      emoji="😵"
+      :text="loadError"
+      hint="请检查网络后重试"
+      @retry="loadShops"
+    />
+
     <div v-else-if="shops.length" class="shop-list">
       <div
         v-for="shop in shops"
@@ -40,41 +49,46 @@
       <span class="empty-text">暂无入驻花店</span>
     </div>
 
-    <div class="tabbar-placeholder"></div>
-    <div v-if="toastText" class="twd-toast">{{ toastText }}</div>
+    <!-- /shops 无 TabBar（只有 home/cart/profile 有），占位留 40rpx 即可（原为对齐 TabBar 的 120rpx，会多出一截空白） -->
   </div>
 </template>
 
 <script setup>
-import { ref, onUnmounted } from 'vue'
+import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { getShopList } from '@/mock/api'
 import NavBar from '@/components/NavBar.vue'
 import FlowerImage from '@/components/FlowerImage.vue'
+import StateBlock from '@/components/StateBlock.vue'
+import { toast } from '@/utils/toast'
 
 const router = useRouter()
 const rpx = n => `${n / 750}rem`
 
 const shops = ref([])
 const loading = ref(true)
+const loadError = ref('')
 
-const toastText = ref('')
-let toastTimer = null
-function toast(text) {
-  toastText.value = text
-  clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => { toastText.value = '' }, 1600)
+async function loadShops() {
+  loading.value = true
+  loadError.value = ''
+  try {
+    shops.value = (await getShopList()) || []
+  } catch (e) {
+    shops.value = []
+    loadError.value = (e && e.message) || '花店列表加载失败'
+  } finally {
+    loading.value = false
+  }
 }
 
 function goShop(id) {
   router.push({ name: 'shop-detail', params: { id } })
 }
 
-onMounted(async () => {
-  shops.value = await getShopList()
-  loading.value = false
+onMounted(() => {
+  loadShops()
 })
-onUnmounted(() => clearTimeout(toastTimer))
 </script>
 
 <style lang="scss" scoped>
@@ -176,18 +190,5 @@ onUnmounted(() => clearTimeout(toastTimer))
 }
 .empty-emoji { font-size: rpx(90); }
 .empty-text { margin-top: rpx(16); color: var(--text-secondary); font-size: var(--fs-title); }
-.tabbar-placeholder { height: rpx(40); }
 .loading-state { padding-top: rpx(16); }
-.twd-toast {
-  position: fixed;
-  left: 50%;
-  bottom: rpx(160);
-  transform: translateX(-50%);
-  padding: rpx(16) rpx(32);
-  border-radius: rpx(40);
-  background: rgba(0, 0, 0, 0.75);
-  color: #fff;
-  font-size: var(--fs-minor);
-  z-index: 200;
-}
 </style>
