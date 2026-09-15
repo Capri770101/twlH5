@@ -13,7 +13,10 @@ const path = require('path')
 
 const PORT = process.env.PORT || 8088
 const DIST = path.join(__dirname, 'dist')
-const AGENT_TARGET = 'https://api.tiaowulan.com'
+// 智能体平台地址：走环境变量 —— 便于「智能体单独部署到另一台机器」时只改配置、不改代码。
+// 支持 http（智能体在内网时）与 https 两种协议。
+const AGENT_TARGET = (process.env.AGENT_TARGET || 'https://api.tiaowulan.com').replace(/\/+$/, '')
+const agentClient = new URL(AGENT_TARGET).protocol === 'http:' ? http : https
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -69,7 +72,7 @@ function proxyAgent(req, res) {
     method: req.method,
     headers: { ...req.headers, host: targetUrl.host }
   }
-  const upstream = https.request(targetUrl, options, (upRes) => {
+  const upstream = agentClient.request(targetUrl, options, (upRes) => {
     // SSE / 长连接：显式告知反代层不要缓冲（nginx 需配 proxy_buffering off 双保险）
     res.setHeader('X-Accel-Buffering', 'no')
     res.writeHead(upRes.statusCode, upRes.headers)

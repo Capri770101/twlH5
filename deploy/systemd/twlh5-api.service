@@ -1,0 +1,29 @@
+# 跳舞兰 H5 —— 业务后端（Express, :4000）
+# 安装：
+#   sudo cp deploy/systemd/twlh5-api.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now twlh5-api
+# 查看日志：sudo journalctl -u twlh5-api -f
+#
+# 环境变量统一放在 EnvironmentFile（/opt/twlh5-api/.env），密钥不入仓库。
+[Unit]
+Description=Tiaowulan H5 business API (Express + MySQL)
+After=network.target
+# 若 MySQL 在本机，可打开下一行（实例名按实际改）
+# After=mysql.service
+
+[Service]
+Type=simple
+User=admin
+Group=admin
+WorkingDirectory=/opt/twlh5-api
+Environment=NODE_ENV=production
+EnvironmentFile=/opt/twlh5-api/.env
+ExecStart=/usr/bin/node src/index.js
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

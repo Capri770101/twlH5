@@ -8,8 +8,10 @@ dotenv.config()
 // 若后续平台提供 CA，可改为 { ca: fs.readFileSync('ca.pem') } 并 rejectUnauthorized:true。
 const sslMode = process.env.DB_SSL === 'false' ? false : true
 
+// 旧只读库通道（READ_SOURCE=mysql 才用；默认走同事业务 API，此通道已弃用）。
+// host 默认值不再硬编码旧机 IP，避免换机后误连（旧机 118.25.21.45 已弃置）。
 const pool = mysql.createPool({
-  host: process.env.DB_HOST || '118.25.21.45',
+  host: process.env.DB_HOST || '127.0.0.1',
   port: Number(process.env.DB_PORT || 3306),
   user: process.env.DB_USER || 'ai_readonly',
   password: process.env.DB_PASSWORD || '',
