@@ -18,6 +18,12 @@
 → 说明当前 nginx 是**单站点配置**。新增 H5 的 `server` 块时，务必只用 `server_name` 精确匹配，
 **绝不能加 `default_server`**，否则会把管理后台的流量抢走。
 
+> **补充验证（2026-09-15 15:21）**：用完全不相干的域名（`baidu.com`、`example.org`、随机假域名）访问本机，
+> **同样返回该管理后台** → 证明它是 nginx 的**默认站点（default server）**，负责兜底所有「未被 server_name 认领」的请求。
+> 因此 `h5.tiaowulan.com` **并非被后台占用**，而是「尚未配置、被默认站点兜底」。
+> ⚠️ 推论：给 h5 配置独立 server 块即可接管该域名，**不会影响后台**（它继续兜底其它域名）；
+> 但若后台的 `server_name` 里**恰好写了 h5.tiaowulan.com**，则会冲突 —— 需看配置确认。
+
 ### 1.5 管理后台的路由结构（2026-09-15 15:09 补充实测）
 - 后台是**单页应用挂在根路径 `/`**：页面引用 `/css/admin.css`、`/js/app.js`、`/js/server-api.js`、`/images/admin-logo-*.png`；切页用 query（如 `/?join=1`）。
 - 后台的**后端 API 在 `/v1/`**：实测 `/v1/` 返回 Express 的 `Cannot GET /v1/` → 说明**有个 Express 后端正在运行**；前端用 Bearer `admin_auth_token` 调用。
