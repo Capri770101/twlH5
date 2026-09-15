@@ -65,6 +65,10 @@ export function mapFlowerRow(row, opts = {}) {
     name: toStr(pick(row, 'name', 'title', 'product_name')),
     subtitle: toStr(pick(row, 'subtitle', 'sub_title', 'slogan', 'brief')),
     categoryId: toStr(pick(row, 'category_id', 'categoryId', 'cat_id')),
+    // 商品归属店铺（aistore 商品自带 shopId/shopName/shopCity；丢了会导致支付/退款找不到子商户）
+    shopId: toStr(pick(row, 'shopId', 'shop_id', 'owner_shop_id', 'ownerShopId')),
+    shopName: toStr(pick(row, 'shopName', 'shop_name', 'owner_shop_name', 'ownerShopName')),
+    shopCity: toStr(pick(row, 'shopCity', 'shop_city')),
     tags: parseJsonOrArray(pick(row, 'tags')),
     price,
     originalPrice,

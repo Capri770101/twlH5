@@ -15,7 +15,10 @@ import authRouter from './auth.js'
 
 const app = express()
 app.use(cors())
-app.use(express.json())
+// 微信支付回调需「原始 body」验签：/api/pay/notify 必须跳过 JSON 解析，交给下游 express.raw，
+// 否则 express.json 先消费请求流 → raw 恒空 → 验签必失败（回调永远进不来）。
+const jsonParser = express.json()
+app.use((req, res, next) => (req.path === '/api/pay/notify' ? next() : jsonParser(req, res, next)))
 
 // 读数据源：api=同事业务 API（默认，推荐）/ mysql=直连 flower_shop（旧方案，白名单已不会开）
 const READ_SOURCE = (process.env.READ_SOURCE || 'api').toLowerCase() === 'mysql' ? 'mysql' : 'api'

@@ -6,7 +6,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { wxpayRequest, decryptResource, verifyNotify, buildJsapiPayParams, WXPAY, WX_API_BASE } from './wxpay.js'
 import { query } from './db.js'
-import { withTx } from './h5db.js'
+import { hq, withTx } from './h5db.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const router = express.Router()
@@ -52,7 +52,18 @@ router.post('/order', async (req, res) => {
   try {
     const { shopId, outTradeNo, amountFen, description, openid, tradeType = 'JSAPI', clientIp } = req.body
     if (!shopId || !outTradeNo || !amountFen) return res.status(400).json({ error: 'missing shopId/outTradeNo/amountFen' })
-    const sub = await resolveSubMch(shopId)
+    // 校验订单：必须存在、处于待支付、且金额与库中一致（以 DB 为准，防篡改金额）
+    const ordRows = await hq('SELECT id, total_price, status, shop_id FROM orders WHERE id = ? LIMIT 1', [outTradeNo])
+    if (!ordRows.length) return res.status(404).json({ error: '订单不存在' })
+    const ord = ordRows[0]
+    if (ord.status !== 'pending') return res.status(409).json({ error: '订单当前状态不可支付：' + ord.status })
+    const dbAmount = Math.round(Number(ord.total_price) || 0)
+    if (dbAmount <= 0) return res.status(400).json({ error: '订单金额异常' })
+    if (Math.round(Number(amountFen)) !== dbAmount) {
+      return res.status(400).json({ error: '支付金额与订单不一致（应为 ' + dbAmount + ' 分）' })
+    }
+    // 店铺以订单归属为准（防前端传错店导致分账对象错误）
+    const sub = await resolveSubMch(String(ord.shop_id || shopId))
     const body = {
       sp_appid: WXPAY.spAppid,
       sp_mchid: WXPAY.spMchid,
@@ -62,7 +73,7 @@ router.post('/order', async (req, res) => {
       out_trade_no: String(outTradeNo),
       notify_url: WXPAY.notifyUrl,
       settle_info: { profit_sharing: true }, // 触发已绑定的自动分账
-      amount: { total: Math.round(Number(amountFen)), currency: 'CNY' }
+      amount: { total: dbAmount, currency: 'CNY' }
     }
     if (tradeType === 'JSAPI') {
       if (!openid) return res.status(400).json({ error: 'JSAPI 需要 openid' })
@@ -157,42 +168,46 @@ export async function handleNotify(rawBody, headers) {
   // decrypted: { out_trade_no, transaction_id, trade_state, success_time, amount, ... }
   const { out_trade_no, transaction_id, trade_state } = decrypted
   if (trade_state === 'SUCCESS') {
-    await onPaid(out_trade_no, transaction_id, decrypted)
+    try {
+      await onPaid(out_trade_no, transaction_id, decrypted)
+    } catch (e) {
+      // 落库失败必须返回非 200，微信才会重试；否则「钱已收、订单仍待付款」
+      console.error('[pay] 回调落库失败，返回 500 等待微信重试：', e && e.message)
+      return { status: 500, json: { code: 'FAIL', message: '处理失败，请稍后重试' } }
+    }
   }
   return { status: 200, json: { code: 'SUCCESS', message: '成功' } }
 }
 
 // 支付成功：h5_shop.orders pending→paid + 落 payments 流水（幂等：仅首次生效）
 async function onPaid(outTradeNo, transactionId, decrypted) {
-  try {
-    await withTx(async conn => {
-      // 仅当订单仍为 pending（待支付）才推进，重复回调自动跳过 → 流水不重复
-      const [orders] = await conn.query(
-        "SELECT id, shop_id, total_price, sub_mchid, pickup_method FROM orders WHERE id = ? AND status = 'pending' LIMIT 1",
-        [outTradeNo]
-      )
-      const o = orders[0]
-      if (!o) return
-      await conn.query(
-        'UPDATE orders SET status = ?, wx_transaction_id = ?, pay_time = NOW() WHERE id = ?',
-        ['paid', transactionId, outTradeNo]
-      )
-      const amount = decrypted && decrypted.amount && decrypted.amount.payer_total
-        ? Math.round(Number(decrypted.amount.payer_total))
-        : o.total_price
-      // JSAPI 回调带 payer(openid)，H5(MWEB) 无 payer → 用于区分 channel
-      const channel = decrypted && decrypted.payer ? 'jsapi' : 'h5'
-      await conn.query(
-        `INSERT INTO payments (order_id, out_trade_no, transaction_id, channel, amount, status, sub_mchid, raw_callback)
-         VALUES (?, ?, ?, ?, ?, 'success', ?, ?)`,
-        [outTradeNo, outTradeNo, transactionId, channel, amount, o.sub_mchid,
-          JSON.stringify(decrypted || {})]
-      )
-    })
-    console.log('[pay] 支付成功已落库：', outTradeNo, transactionId)
-  } catch (e) {
-    console.warn('[pay] 支付回调落库失败：', e.message)
-  }
+  // ⚠️ 失败必须向上抛（handleNotify 会返回 5xx 让微信重试），不能吞掉，
+  //    否则会出现「钱已收、订单永久待付款」的资损。
+  await withTx(async conn => {
+    // 仅当订单仍为 pending（待支付）才推进，重复回调自动跳过 → 流水不重复
+    const [orders] = await conn.query(
+      "SELECT id, shop_id, total_price, sub_mchid, pickup_method FROM orders WHERE id = ? AND status = 'pending' LIMIT 1",
+      [outTradeNo]
+    )
+    const o = orders[0]
+    if (!o) return
+    await conn.query(
+      'UPDATE orders SET status = ?, wx_transaction_id = ?, pay_time = NOW() WHERE id = ?',
+      ['paid', transactionId, outTradeNo]
+    )
+    const amount = decrypted && decrypted.amount && decrypted.amount.payer_total
+      ? Math.round(Number(decrypted.amount.payer_total))
+      : o.total_price
+    // JSAPI 回调带 payer(openid)，H5(MWEB) 无 payer → 用于区分 channel
+    const channel = decrypted && decrypted.payer ? 'jsapi' : 'h5'
+    await conn.query(
+      `INSERT INTO payments (order_id, out_trade_no, transaction_id, channel, amount, status, sub_mchid, raw_callback)
+       VALUES (?, ?, ?, ?, ?, 'success', ?, ?)`,
+      [outTradeNo, outTradeNo, transactionId, channel, amount, o.sub_mchid,
+        JSON.stringify(decrypted || {})]
+    )
+  })
+  console.log('[pay] 支付成功已落库：', outTradeNo, transactionId)
   if (process.env.WXPAY_TRIGGER_PROFITSHARING === 'true') {
     try {
       await triggerProfitSharing(outTradeNo, transactionId)

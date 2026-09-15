@@ -8,6 +8,7 @@
 import express from 'express'
 import { hq, withTx } from './h5db.js'
 import { resolveUser as resolveTokenUser } from './token.js'
+import { toFlower, storeAllFlowers } from './store.js'
 
 const router = express.Router()
 
@@ -51,6 +52,18 @@ function genOrderNo() {
   const ts = '' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) +
     pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds())
   return 'T' + ts + String(Math.floor(Math.random() * 900) + 100)
+}
+
+/** 商品 id → 权威价格（分）。来源 aistore 商品库（storeAllFlowers 带 TTL 缓存）。
+ *  下单计价必须用它，绝不信任客户端传入的 price（防改价）。 */
+async function loadAuthoritativePrices() {
+  const all = await storeAllFlowers()
+  const map = new Map()
+  for (const row of all || []) {
+    const f = toFlower(row)
+    if (f && f.id) map.set(String(f.id), Number(f.price) || 0)
+  }
+  return map
 }
 
 /** DB 订单行 + 明细 → 前端订单形状 */
@@ -132,6 +145,19 @@ router.post('/', async (req, res) => {
       price,
       quantity: qty > 99 ? 99 : qty
     })
+  }
+  // —— 服务端权威定价（防改价）：按商品库实际价格计价，覆盖客户端传入的 price ——
+  let priceMap
+  try {
+    priceMap = await loadAuthoritativePrices()
+  } catch (e) {
+    console.error('[orders] 商品价格校验失败：', e && e.message)
+    return res.status(503).json({ error: '商品价格校验失败，请稍后重试' })
+  }
+  for (const it of cleanItems) {
+    const real = priceMap.get(String(it.id))
+    if (real == null) return res.status(400).json({ error: '商品不存在或已下架：' + (it.name || it.id) })
+    it.price = real // 以库价为准
   }
   // 服务端计价（分）：商品小计 - 满减（与前端 Checkout 同规则：满 200 减 20）
   const itemTotal = cleanItems.reduce((s, it) => s + it.price * it.quantity, 0)

@@ -28,6 +28,9 @@ export async function ensureSmsTable() {
 }
 
 export function isDebugMode() {
+  // ⚠️ 生产环境默认关闭 debug：debug 含「免库万能码 123456 + 回显验证码」，
+  //    会让任意手机号绕过短信校验登录/注册 → 账号体系失守。仅显式 ALLOW_DEBUG_SMS=1 才放行。
+  if (process.env.NODE_ENV === 'production' && process.env.ALLOW_DEBUG_SMS !== '1') return false
   if (process.env.DEBUG_SMS === '1') return true
   // 未配齐腾讯云短信密钥 → 视为 debug（避免误以为已接真实短信商）
   return !(process.env.SMS_TC3_SECRET_ID && process.env.SMS_TC3_SECRET_KEY &&

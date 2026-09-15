@@ -142,6 +142,8 @@ function save() {
     province: province.value.name,
     city: city.value.name,
     district: district.value.name,
+    // region = 省市区（下单接口与后端 orders.addr_region 读取该字段，缺了订单地址会不完整）
+    region: province.value.name + city.value.name + district.value.name,
     provinceCode: province.value.code,
     cityCode: city.value.code,
     districtCode: district.value.code,

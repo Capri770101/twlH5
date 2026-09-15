@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>跳舞兰 AI 花店 H5 · 功能与业务流程检查报告</title>
+<style>
+  :root{
+    --bg:#f5f6f8; --card:#ffffff; --ink:#1f2328; --muted:#5b6470; --line:#e6e9ee;
+    --brand:#c2185b; --brand-soft:#fce4ec;
+    --green:#1a7f37; --green-bg:#e6f4ea;
+    --amber:#9a6700; --amber-bg:#fff8e1;
+    --red:#b42318; --red-bg:#fdecea;
+    --blue:#0b5fff; --blue-bg:#e8f0ff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:"PingFang SC","Microsoft YaHei","Hiragino Sans GB","Noto Sans SC",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    line-height:1.7;font-size:15px}
+  .wrap{max-width:960px;margin:0 auto;padding:32px 20px 64px}
+  .doc{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:40px 44px;box-shadow:0 1px 3px rgba(16,24,40,.06)}
+  header.top{border-bottom:2px solid var(--brand);padding-bottom:20px;margin-bottom:28px}
+  .eyebrow{color:var(--brand);font-weight:700;letter-spacing:.06em;font-size:13px;text-transform:uppercase}
+  h1{font-size:26px;margin:8px 0 10px;line-height:1.35}
+  .meta{color:var(--muted);font-size:13px}
+  .meta span{display:inline-block;margin-right:16px}
+  h2{font-size:19px;margin:36px 0 14px;padding-left:12px;border-left:4px solid var(--brand);line-height:1.3}
+  h3{font-size:16px;margin:22px 0 10px}
+  p{margin:10px 0}
+  .lead{background:linear-gradient(180deg,#fff 0%,var(--brand-soft) 260%);border:1px solid #f3d3de;border-radius:12px;padding:18px 20px;margin:0 0 12px}
+  ul{margin:8px 0;padding-left:22px} li{margin:6px 0}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14px}
+  th,td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+  th{background:#fafbfc;font-weight:600;color:#333}
+  tbody tr:nth-child(even){background:#fcfcfd}
+  .tag{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12.5px;font-weight:600;white-space:nowrap}
+  .t-ok{color:var(--green);background:var(--green-bg)}
+  .t-mid{color:var(--amber);background:var(--amber-bg)}
+  .t-no{color:var(--red);background:var(--red-bg)}
+  .mini{color:var(--muted);font-size:12.5px}
+  .kpi{display:flex;gap:14px;flex-wrap:wrap;margin:16px 0 4px}
+  .kpi .box{flex:1 1 140px;border:1px solid var(--line);border-radius:12px;padding:14px 16px;background:#fff}
+  .kpi .n{font-size:24px;font-weight:800;color:var(--brand)}
+  .kpi .l{font-size:13px;color:var(--muted)}
+  .callout{border-left:4px solid var(--blue);background:var(--blue-bg);border-radius:0 10px 10px 0;padding:12px 16px;margin:14px 0}
+  .callout.warn{border-color:#d9822b;background:#fff4e6}
+  code{background:#f1f2f5;border-radius:5px;padding:1px 6px;font-size:13px;font-family:ui-monospace,Consolas,monospace}
+  footer{margin-top:32px;padding-top:16px;border-top:1px solid var(--line);color:var(--muted);font-size:12.5px}
+  @media print{body{background:#fff}.wrap{padding:0;max-width:none}.doc{border:none;box-shadow:none;padding:0}
+    h2{break-after:avoid} table{break-inside:auto} tr{break-inside:avoid}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="doc">
+
+  <header class="top">
+    <div class="eyebrow">Functional &amp; Flow Review</div>
+    <h1>跳舞兰 AI 花店 H5 · 功能与业务流程检查报告</h1>
+    <div class="meta">
+      <span>检查日期：2026-09-15</span>
+      <span>方式：4 条线并行只读审查 + 关键项人工复核</span>
+      <span>范围：全站页面与业务流程</span>
+    </div>
+  </header>
+
+  <div class="lead">
+    <p style="margin-top:0"><b>结论：</b>功能覆盖完整（19 条路由），页面体验此前已优化；但<b>交易链路存在多处高危缺陷</b>——支付回调进不来、下单可改价、支付金额可篡改、短信万能码在生产可用。这些不修，真实订单跑不通且存在<b>资金损失风险</b>。</p>
+    <p style="margin-bottom:0">本轮已修复 <b>8 项</b>（含 4 项资损/安全级）；另有 <b>6 项 P1 + 6 项 P2</b> 待决策或后续处理，其中最关键的是「订单状态由谁推进」——这是<b>产品级缺口</b>。</p>
+  </div>
+
+  <div class="kpi">
+    <div class="box"><div class="n">19</div><div class="l">覆盖路由 / 页面</div></div>
+    <div class="box"><div class="n">8</div><div class="l">本轮已修复</div></div>
+    <div class="box"><div class="n">4</div><div class="l">资损 / 安全级</div></div>
+    <div class="box"><div class="n">12</div><div class="l">待决策 / 待修</div></div>
+  </div>
+
+  <h2>一、检查范围与方法</h2>
+  <p><b>覆盖流程：</b>商品浏览 → 分类/搜索 → 详情 → 加购 → 购物车 → 结算 → 下单 → 支付 → 订单列表/详情 → 取消/退款 → 评价；账号（注册 / 三种登录 / 登出）；地址管理；AI 顾问对话与卡片；收藏、优惠券、DIY 方案、分享。</p>
+  <p><b>方法：</b>按「订单主流程 / 账号与地址 / 浏览与 AI 顾问 / 前后端接口契约」四条线并行审查，再对涉及金额与安全的关键结论逐条人工复核代码。</p>
+
+  <h2>二、已修复（8 项）</h2>
+  <table>
+    <thead><tr><th style="width:34px">#</th><th style="width:210px">问题</th><th style="width:250px">影响</th><th>修复</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>支付回调拿不到原始 body（JSON 解析先消费了请求流）</td><td><span class="tag t-no">验签必失败</span> 回调永远进不来 → 订单永不转「已支付」</td><td>JSON 解析跳过 <code>/api/pay/notify</code>，交给 <code>express.raw</code></td></tr>
+      <tr><td>2</td><td>回调落库失败仍返回 200 成功</td><td><span class="tag t-no">钱已收、订单仍待付款</span>（微信不重试）</td><td>落库失败返回 5xx，触发微信重试</td></tr>
+      <tr><td>3</td><td>支付下单直接用前端传的金额，不校验订单</td><td><span class="tag t-no">可篡改为 1 分钱支付</span></td><td>按数据库校验「存在 + 待支付 + 金额一致」，金额以库为准</td></tr>
+      <tr><td>4</td><td>下单服务端仍信任前端传的商品单价</td><td><span class="tag t-no">可传 0.01 元下单</span>（原先只防了总价）</td><td>按商品库权威价重算，取不到价即拒单</td></tr>
+      <tr><td>5</td><td>商品映射丢掉店铺归属（数据源其实有）</td><td><span class="tag t-mid">支付/退款找不到子商户</span> → 静默失败</td><td>映射补出 <code>shopId / shopName / shopCity</code></td></tr>
+      <tr><td>6</td><td>短信 debug 万能码在生产环境可用</td><td><span class="tag t-no">任意手机号填 123456 即可登录</span></td><td>生产默认禁用 debug（需显式开关才放行）</td></tr>
+      <tr><td>7</td><td>登录/注册网络失败回退 mock 假成功</td><td><span class="tag t-mid">提示"登录成功"但库里没账号</span></td><td>一律抛错；并修正会导致 403 的 <code>bindUserId</code> 下发</td></tr>
+      <tr><td>8</td><td>地址省市区字段错位（产出与读取字段名不一致）</td><td><span class="tag t-mid">订单地址不完整</span>，配送风险</td><td>补 <code>region</code> + 兼容兜底 + 结算页展示完整地址</td></tr>
+    </tbody>
+  </table>
+
+  <h2>三、待决策 / 待修</h2>
+  <h3>P1 —— 建议尽快处理</h3>
+  <table>
+    <thead><tr><th style="width:250px">问题</th><th style="width:260px">影响</th><th>建议</th></tr></thead>
+    <tbody>
+      <tr><td><b>订单状态机后半段没有推进入口</b>（只有「待支付→已支付」）</td><td>制作中/配送中/已完成三个 tab 恒为空；评价只对「已完成」开放 → <b>用户永远无法评价</b></td><td>明确由谁推进（商家端 / 后台 / 定时任务）——<b>产品级缺口</b></td></tr>
+      <tr><td>多店购物车被合并成一单</td><td>发货归属与<b>分账对象错误</b></td><td>按店铺拆单</td></tr>
+      <tr><td>优惠券未闭环（结算只做硬编码满减，从不读券）</td><td>领券中心 / 我的优惠券是<b>死链路</b></td><td>接入结算用券，或先下线入口</td></tr>
+      <tr><td>微信内 <code>openid</code> 未取（订单页重付传空）</td><td>微信内重新支付必报错</td><td>从登录态取 <code>openid</code></td></tr>
+      <tr><td>登录态不校验有效期；订单接口 401 会回退 mock</td><td>token 过期仍显示"已登录"，<b>可能展示假订单</b></td><td>过期 / 401 即登出跳登录</td></tr>
+      <tr><td>取消订单不关闭微信预支付单</td><td>已取消的订单仍可能被付款成功</td><td>取消时同步关单</td></tr>
+    </tbody>
+  </table>
+
+  <h3>P2 —— 优化 / 后续</h3>
+  <ul>
+    <li><b>图片资源</b>：mock 引用的图片大量 404、商品 <code>images</code> 字段恒为空 → 列表与详情大图全部降级为 emoji。</li>
+    <li><b>仅本地存储</b>：收藏、地址、评价、DIY 方案都存 localStorage → 换设备即丢、与账号脱节。</li>
+    <li><b>mock 静默回退</b>：真实接口失败会自动回退假数据，用户可能把演示数据当真实（建议标注"演示数据"）。</li>
+    <li>搜索失败被吞成"没有找到"；防抖无请求序号（慢响应会覆盖新结果）。</li>
+    <li>AI 流式解析只按 <code>\n\n</code> 切分，CRLF 或末段无空行时会丢事件。</li>
+    <li>分账：主动分账金额写死 0、从订单号解析店铺 id 必然失败（目前靠平台自动分账）。</li>
+  </ul>
+
+  <h2>四、各流程健康度</h2>
+  <table>
+    <thead><tr><th style="width:200px">流程</th><th style="width:150px">状态</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td>浏览 / 分类 / 搜索 / 详情</td><td><span class="tag t-ok">✅ 可用</span></td><td>图片降级为 emoji；部分评价数据为 mock</td></tr>
+      <tr><td>注册 / 登录（三种方式）</td><td><span class="tag t-ok">✅ 可用（已修）</span></td><td>待短信资质到位后真机验证</td></tr>
+      <tr><td>购物车 / 加购</td><td><span class="tag t-ok">✅ 可用</span></td><td>库存上限、防重复已处理</td></tr>
+      <tr><td>下单</td><td><span class="tag t-ok">✅ 已加固</span></td><td>防改价已补；依赖商品库可用</td></tr>
+      <tr><td>支付</td><td><span class="tag t-mid">⚠️ 代码已修，待平台配置</span></td><td>回调链路已修通；仍缺 APIv3 密钥与授权</td></tr>
+      <tr><td>订单列表 / 详情 / 取消</td><td><span class="tag t-mid">⚠️ 部分</span></td><td>查询可用；<b>状态推进缺机制</b></td></tr>
+      <tr><td>退款</td><td><span class="tag t-mid">⚠️ 半闭环</span></td><td>接口在，但退款后未回写订单状态</td></tr>
+      <tr><td>评价</td><td><span class="tag t-mid">⚠️ 仅本地</span></td><td>且受"无法进入已完成"阻塞</td></tr>
+      <tr><td>AI 顾问</td><td><span class="tag t-ok">✅ 可用</span></td><td>卡片渲染基本正常，DIY 方案为前端兜底</td></tr>
+    </tbody>
+  </table>
+
+  <h2>五、建议的行动顺序</h2>
+  <div class="callout">
+    <b>1.</b> 短信资质到位后，第一时间真机验证「注册 → 登录 → 下单」闭环（已修部分需真环境回归）。<br>
+    <b>2.</b> 明确订单状态由谁推进（商家端 / 后台）——不解决，订单永远停在「待接单」，评价功能等于废掉。<br>
+    <b>3.</b> 决定优惠券是否上线：要么接入结算用券，要么暂时下线入口。<br>
+    <b>4.</b> 多店拆单：若业务存在"一单跨多店"，必须拆；否则分账会对错对象。<br>
+    <b>5.</b> 补图片资源：体验层面最直观的短板。
+  </div>
+
+  <h2>六、本轮修复的验证</h2>
+  <ul>
+    <li>后端 6 个改动文件 <code>node --check</code> 全部通过；</li>
+    <li>前端 <code>npm run build</code> 构建通过；</li>
+    <li>密码哈希模块自测通过（正确 / 错误 / 空 / 垃圾输入）。</li>
+  </ul>
+
+  <footer>
+    报告中的问题均给出代码位置级证据。本轮修复仅针对「明确且低风险」的高危项；涉及产品决策的（状态推进、拆单、优惠券）未擅自改动。
+  </footer>
+
+</div>
+</div>
+</body>
+</html>

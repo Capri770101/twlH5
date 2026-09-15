@@ -27,7 +27,7 @@
             <span class="address-phone">{{ address.phone }}</span>
           </div>
         </div>
-        <span class="address-detail">{{ address.detail }}</span>
+        <span class="address-detail">{{ addressFull }}</span>
         <span class="checkout-chevron">›</span>
       </div>
     </div>
@@ -319,6 +319,13 @@ const router = useRouter()
 
 const pickupMethod = ref('delivery')
 const address = computed(() => store.selectedAddress || { name: '', phone: '', detail: '请选择收货地址' })
+// 完整地址展示：优先 full，其次「省市区 + 详细」（旧数据只有 detail 时也不会空白）
+const addressFull = computed(() => {
+  const a = store.selectedAddress
+  if (!a) return '请选择收货地址'
+  const region = a.region || [a.province, a.city, a.district].filter(Boolean).join('')
+  return a.full || ((region || '') + (a.detail || ''))
+})
 const showAddr = ref(false)
 const pickupShop = ref({ name: '盐田花语鲜花店', address: '深圳市盐田区海山路18号' })
 const pickupContactName = ref('')

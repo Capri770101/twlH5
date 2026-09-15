@@ -340,7 +340,8 @@ export async function createOrder(payload) {
           address: {
             name: addr.name || '',
             phone: addr.phone || '',
-            region: addr.region || '',
+            // 兼容两种地址产物：优先 region，其次由省市区拼出（早期 AddressPicker 无 region）
+            region: addr.region || [addr.province, addr.city, addr.district].filter(Boolean).join(''),
             detail: addr.detail || ''
           },
           expectDeliveryTime: payload.expectDeliveryTime || '',
@@ -603,7 +604,11 @@ function currentIdentity() {
   let guestId = ''
   try { guestId = localStorage.getItem('twd_guest_id') || '' } catch (e) { /* ignore */ }
   const ui = localUser()
-  const bindUserId = (ui && ui.id && !ui.phone) ? String(ui.id) : '' // 仅无手机号壳需要并入
+  const t = localToken() || ''
+  // 仅当持有「真实 JWT」时才下发 bindUserId：后端 assertCanBind 会校验 JWT.uid 与之一致；
+  // 若带 mock_ token 或无 token 却传 bindUserId，会被判 403「无权绑定该账号」而卡死注册/登录。
+  const canBind = !!t && !t.startsWith('mock_')
+  const bindUserId = (canBind && ui && ui.id && !ui.phone) ? String(ui.id) : ''
   return { guestId, bindUserId }
 }
 
@@ -744,92 +749,49 @@ export async function sendSmsCode(phone) {
 }
 
 // 手机号 + 验证码登录：真后端校验 + 账号统一（guest/当前账号并入手机号主账号）
+// ⚠️ 硬策略：登录必须真实，网络失败直接抛错，绝不回退 mock 制造「假登录成功」
 export async function loginByPhone(phone, code) {
-  if (REAL_API_ENABLED) {
-    try {
-      const { guestId, bindUserId } = currentIdentity()
-      const d = await realPost('/auth/sms/login', {
-        phone,
-        code,
-        guestId: guestId || undefined,
-        bindUserId: bindUserId || undefined,
-        nickname: '花友' + phone.slice(-4)
-      }, localToken() || undefined)
-      const info = shapeUser(d, '花友' + phone.slice(-4))
-      persistAuth(d.token, info)
-      return { userInfo: info, token: d.token }
-    } catch (e) {
-      if (!isNetErr(e)) throw e // 验证码错误/已消费/频繁 → 如实上抛，绝不 mock 假成功
-      console.warn('[api] /auth/sms/login 网络失败，回退 mock：', e && e.message)
-    }
-  }
-  await delay(300)
-  if (!/^\d{6}$/.test(code || '')) {
-    throw new Error('验证码错误')
-  }
-  const userInfo = {
-    id: 'u_' + Math.random().toString(36).slice(2, 8),
-    nickname: '花友' + phone.slice(-4),
-    avatar: '',
-    phone
-  }
-  const token = 'mock_phone_' + Math.random().toString(36).slice(2, 12)
-  return { userInfo, token }
+  if (!REAL_API_ENABLED) throw new Error('登录服务未配置（VITE_API_BASE 缺失）')
+  const { guestId, bindUserId } = currentIdentity()
+  const d = await realPost('/auth/sms/login', {
+    phone,
+    code,
+    guestId: guestId || undefined,
+    bindUserId: bindUserId || undefined,
+    nickname: '花友' + phone.slice(-4)
+  }, localToken() || undefined)
+  const info = shapeUser(d, '花友' + phone.slice(-4))
+  persistAuth(d.token, info)
+  return { userInfo: info, token: d.token }
 }
 
 // 账号密码注册：账号 + 密码 + 手机号（短信验证码）→ 后端 /auth/register 创建并直接登录
+// ⚠️ 硬策略：注册必须真实落库，失败直接抛错，绝不回退 mock 制造「假注册成功」
 export async function registerAccount({ username, password, phone, code, nickname }) {
-  if (REAL_API_ENABLED) {
-    try {
-      const { guestId, bindUserId } = currentIdentity()
-      const d = await realPost('/auth/register', {
-        username,
-        password,
-        phone,
-        code,
-        nickname: nickname || ('花友' + String(phone).slice(-4)),
-        guestId: guestId || undefined,
-        bindUserId: bindUserId || undefined
-      }, localToken() || undefined)
-      const info = shapeUser(d, username)
-      persistAuth(d.token, info)
-      return { userInfo: info, token: d.token }
-    } catch (e) {
-      if (!isNetErr(e)) throw e // 账号重复 / 验证码错 / 手机号已注册 → 如实上抛
-      console.warn('[api] /auth/register 网络失败，回退 mock：', e && e.message)
-    }
-  }
-  await delay(300)
-  if (!/^\d{6}$/.test(code || '')) throw new Error('验证码错误')
-  const userInfo = { id: 'u_' + Math.random().toString(36).slice(2, 8), nickname: username, avatar: '', phone, username }
-  const token = 'mock_reg_' + Math.random().toString(36).slice(2, 12)
-  return { userInfo, token }
+  if (!REAL_API_ENABLED) throw new Error('注册服务未配置（VITE_API_BASE 缺失）')
+  const { guestId, bindUserId } = currentIdentity()
+  const d = await realPost('/auth/register', {
+    username,
+    password,
+    phone,
+    code,
+    nickname: nickname || ('花友' + String(phone).slice(-4)),
+    guestId: guestId || undefined,
+    bindUserId: bindUserId || undefined
+  }, localToken() || undefined)
+  const info = shapeUser(d, username)
+  persistAuth(d.token, info)
+  return { userInfo: info, token: d.token }
 }
 
 // 账号密码登录：account 支持「账号」或「手机号」
+// ⚠️ 硬策略：必须真实验证，失败直接抛错，绝不回退 mock
 export async function loginByPassword(account, password) {
-  if (REAL_API_ENABLED) {
-    try {
-      const d = await realPost('/auth/password/login', { account, password })
-      const info = shapeUser(d, account)
-      persistAuth(d.token, info)
-      return { userInfo: info, token: d.token }
-    } catch (e) {
-      if (!isNetErr(e)) throw e // 账号或密码错误 → 如实上抛，绝不 mock 假成功
-      console.warn('[api] /auth/password/login 网络失败，回退 mock：', e && e.message)
-    }
-  }
-  await delay(300)
-  if (!password) throw new Error('请输入密码')
-  const userInfo = {
-    id: 'u_' + Math.random().toString(36).slice(2, 8),
-    nickname: account,
-    avatar: '',
-    phone: /^1[3-9]\d{9}$/.test(account) ? account : '',
-    username: account
-  }
-  const token = 'mock_pwd_' + Math.random().toString(36).slice(2, 12)
-  return { userInfo, token }
+  if (!REAL_API_ENABLED) throw new Error('登录服务未配置（VITE_API_BASE 缺失）')
+  const d = await realPost('/auth/password/login', { account, password })
+  const info = shapeUser(d, account)
+  persistAuth(d.token, info)
+  return { userInfo: info, token: d.token }
 }
 
 // ===== AI 花艺顾问（对接跳舞兰自研智能体平台）=====
