@@ -3,7 +3,8 @@
 // 功能：
 //   1) 静态托管同目录 dist/（SPA：未知路径 fallback index.html）
 //   2) /agent/* 透传到 https://api.tiaowulan.com/*（与 Vite dev 代理一致，strip /agent 前缀）
-//      —— X-API-Key 由前端 bundle 同源带入，本服务只做转发，不在服务端存 key
+//      —— 🔐 平台 X-API-Key 只存在于本服务（环境变量 AGENT_API_KEY），由反代统一注入；
+//         前端 bundle 不持有密钥（打包后浏览器可见即等于公开）。
 // 注意：监听高位端口，无需 root；正式 HTTPS/80 由 nginx（root）另行配置。
 
 const http = require('http')
@@ -17,6 +18,9 @@ const DIST = path.join(__dirname, 'dist')
 // 支持 http（智能体在内网时）与 https 两种协议。
 const AGENT_TARGET = (process.env.AGENT_TARGET || 'https://api.tiaowulan.com').replace(/\/+$/, '')
 const agentClient = new URL(AGENT_TARGET).protocol === 'http:' ? http : https
+// 智能体平台凭证：仅服务端可见（放 /opt/twlh5-h5/.env，由 systemd EnvironmentFile 注入）
+// 未配置时不注入该头，便于智能体在内网免鉴权时直接连通。
+const AGENT_API_KEY = process.env.AGENT_API_KEY || ''
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -68,10 +72,11 @@ function serveStatic(req, res) {
 function proxyAgent(req, res) {
   const targetPath = req.url.replace(/^\/agent/, '') || '/'
   const targetUrl = new URL(targetPath, AGENT_TARGET)
-  const options = {
-    method: req.method,
-    headers: { ...req.headers, host: targetUrl.host }
-  }
+  const headers = { ...req.headers, host: targetUrl.host }
+  // 🔐 一律以服务端凭证为准：有则覆盖（并丢弃前端可能带来的伪造值），无则删除
+  if (AGENT_API_KEY) headers['x-api-key'] = AGENT_API_KEY
+  else delete headers['x-api-key']
+  const options = { method: req.method, headers }
   const upstream = agentClient.request(targetUrl, options, (upRes) => {
     // SSE / 长连接：显式告知反代层不要缓冲（nginx 需配 proxy_buffering off 双保险）
     res.setHeader('X-Accel-Buffering', 'no')

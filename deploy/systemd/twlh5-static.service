@@ -6,20 +6,25 @@
 # 查看日志：sudo journalctl -u twlh5-static -f
 #
 # ⚠️ 该服务只监听高位端口 8088，由 nginx 反向代理；不占用 80/443。
+#
+# 🔐 密钥：/opt/twlh5-h5/.env（600, root）里放 AGENT_API_KEY，
+#    由下面的 EnvironmentFile 注入 → 前端 bundle 不持有平台凭证。
 [Unit]
 Description=Tiaowulan H5 static site + agent proxy (server.cjs)
 After=network.target
 
 [Service]
 Type=simple
-User=admin
-Group=admin
+User=twlh5
+Group=twlh5
 WorkingDirectory=/opt/twlh5-h5
 Environment=NODE_ENV=production
 Environment=PORT=8088
 # 智能体平台地址：若后续把智能体部署到另一台机器，只改这里（支持 http/https）
 Environment=AGENT_TARGET=https://api.tiaowulan.com
-ExecStart=/usr/bin/node server.cjs
+# 覆盖式配置（放 AGENT_TARGET / AGENT_API_KEY）；文件不存在也不报错
+EnvironmentFile=-/opt/twlh5-h5/.env
+ExecStart=/usr/local/bin/node server.cjs
 Restart=always
 RestartSec=3
 StandardOutput=journal

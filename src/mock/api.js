@@ -803,12 +803,27 @@ export async function loginByPassword(account, password) {
 //      ui 类型：text / dialog_options / plan_card / shop_card / order_card / pay_jump
 // 开发态：apiBase 默认 '/agent'（Vite dev 代理转发，同源免 CORS）；生产可设 VITE_AGENT_API_BASE=https://api.tiaowulan.com
 // 任何异常（无 key / 网络 / CORS / 超时）→ 自动回退前端 mock 演示
+// 🔐 平台 Key 绝不进前端包（打包后浏览器可见即等于公开）。
+//    生产走同源反代（apiBase='/agent'，由 deploy/server.cjs 注入 X-API-Key）；
+//    仅当直连绝对地址（VITE_AGENT_API_BASE 为 http(s)://…）时才需要 VITE_AGENT_API_KEY。
 export const AGENT_CONFIG = {
   apiBase: import.meta.env.VITE_AGENT_API_BASE || '/agent',
-  enabled: true, // 有 key 即尝试走真实智能体，失败自动回退 mock
+  enabled: true, // 就绪即走真实智能体，失败自动回退 mock
   get apiToken() {
     return import.meta.env.VITE_AGENT_API_KEY || ''
+  },
+  // apiBase 为相对路径 = 经同源反代，key 由服务端注入
+  get viaProxy() {
+    return this.apiBase.indexOf('://') === -1
+  },
+  get ready() {
+    return this.enabled && (!!this.apiToken || this.viaProxy)
   }
+}
+
+// 有 key 时才带 X-API-Key；经反代时前端不发该头（由服务端补齐）
+function agentKeyHeader() {
+  return AGENT_CONFIG.apiToken ? { 'X-API-Key': AGENT_CONFIG.apiToken } : {}
 }
 
 // 场景预设（与小程序 ai-chat 一致）
@@ -1004,7 +1019,7 @@ async function ensureAgentToken() {
   if (agentToken && Date.now() < agentTokenExp - 60000) return agentToken
   const res = await fetch(AGENT_CONFIG.apiBase + '/auth/token', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-API-Key': AGENT_CONFIG.apiToken },
+    headers: { 'Content-Type': 'application/json', ...agentKeyHeader() },
     body: JSON.stringify({ external_user_id: getExternalUid() })
   })
   if (!res.ok) throw new Error('agent token ' + res.status)
@@ -1086,7 +1101,7 @@ function normalizeAdvisorResponse(r, sessionId) {
 
 // 主入口：优先真实智能体，失败回退 mock
 export async function chatWithAdvisor({ message, shopId = 'default', sessionId = '' }) {
-  if (AGENT_CONFIG.enabled && AGENT_CONFIG.apiToken) {
+  if (AGENT_CONFIG.ready) {
     try {
       const tok = await ensureAgentToken()
       const ctrl = new AbortController()
@@ -1096,7 +1111,7 @@ export async function chatWithAdvisor({ message, shopId = 'default', sessionId =
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${tok}`,
-          'X-API-Key': AGENT_CONFIG.apiToken
+          ...agentKeyHeader()
         },
         body: JSON.stringify({
           message,
@@ -1147,7 +1162,7 @@ function parseSseChunk(chunk) {
 //   done      → { session_id }                 结束，携带会话 id
 // onEvent(ev) 逐事件回调；返回 { ok, gotAny, sessionId }
 export async function streamAdvisorChat({ message, shopId = 'default', sessionId = '', onEvent, signal }) {
-  if (!(AGENT_CONFIG.enabled && AGENT_CONFIG.apiToken)) return { ok: false, gotAny: false, sessionId }
+  if (!AGENT_CONFIG.ready) return { ok: false, gotAny: false, sessionId }
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), 120000)
   const onAbort = () => ctrl.abort()
@@ -1162,7 +1177,7 @@ export async function streamAdvisorChat({ message, shopId = 'default', sessionId
         'Content-Type': 'application/json',
         Accept: 'text/event-stream',
         Authorization: `Bearer ${tok}`,
-        'X-API-Key': AGENT_CONFIG.apiToken
+        ...agentKeyHeader()
       },
       body: JSON.stringify({
         message,
@@ -1209,7 +1224,7 @@ export async function pollAgentTask(pollUrl, onImage) {
   try {
     for (let i = 0; i < 12; i++) {
       const res = await fetch(pollUrl, {
-        headers: AGENT_CONFIG.apiToken ? { 'X-API-Key': AGENT_CONFIG.apiToken } : {},
+        headers: agentKeyHeader(),
         signal: ctrl.signal
       })
       if (!res.ok) break
