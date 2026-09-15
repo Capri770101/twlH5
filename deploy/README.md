@@ -18,6 +18,14 @@
 → 说明当前 nginx 是**单站点配置**。新增 H5 的 `server` 块时，务必只用 `server_name` 精确匹配，
 **绝不能加 `default_server`**，否则会把管理后台的流量抢走。
 
+### 1.5 管理后台的路由结构（2026-09-15 15:09 补充实测）
+- 后台是**单页应用挂在根路径 `/`**：页面引用 `/css/admin.css`、`/js/app.js`、`/js/server-api.js`、`/images/admin-logo-*.png`；切页用 query（如 `/?join=1`）。
+- 后台的**后端 API 在 `/v1/`**：实测 `/v1/` 返回 Express 的 `Cannot GET /v1/` → 说明**有个 Express 后端正在运行**；前端用 Bearer `admin_auth_token` 调用。
+- `/admin` 是 nginx 目录（`301 → /admin/` 后 `403`）；`/api/health` 等未知路径返回后台的 index.html（**SPA fallback，不是真后端**）。
+- **含义（重要）**：根路径 `/` 已被后台占用。若 H5 与后台共用同一域名，必须明确「**谁占根路径、谁占子路径**」——
+  建议 H5 占根路径（面向 C 端用户，路径要干净），后台迁到 `/admin` 或改用其它域名。
+  ⚠️ 一旦给 `h5.tiaowulan.com` 配独立 server 块，该域名下**所有路径（含 `/v1/`、`/api/`）都会归 H5**；后台若也在用这个域名就会被抢，需先与后台负责人确认。
+
 ### 2. 域名已确定：`h5.tiaowulan.com`（2026-09-15 15:07 更新）
 - ✅ **DNS 已解析到本机**（`h5.tiaowulan.com → 129.204.85.139`），HTTPS 证书可正常握手。
 - ❌ **但 `https://h5.tiaowulan.com` 目前返回的仍是「管理后台」** —— 因为 nginx 未做域名分流（见第 1 条）。
