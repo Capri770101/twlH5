@@ -462,5 +462,12 @@ app.use('/api/auth', authRouter)
 
 const PORT = Number(process.env.API_PORT || 4000)
 app.listen(PORT, () => {
-  console.log(`[server] 跳舞兰 H5 后端已启动: http://localhost:${PORT}  (DB host=${process.env.DB_HOST || '118.25.21.45'} db=${process.env.DB_NAME || 'flower_shop'})`)
+  const store = process.env.READ_SOURCE || 'api'
+  const biz = `业务库 ${process.env.H5_DB_USER || 'h5_app'}@${process.env.H5_DB_HOST || '127.0.0.1'}:${process.env.H5_DB_PORT || 3306}/${process.env.H5_DB_NAME || 'h5_shop'}`
+  const src = store === 'api'
+    ? `商品源 ${process.env.STORE_API_BASE || 'https://aistore.xiangbinmeigui.com'}`
+    : `商品源 DB ${process.env.DB_USER || 'ai_readonly'}@${process.env.DB_HOST || '127.0.0.1'}/${process.env.DB_NAME || 'flower_shop'}`
+  console.log(`[server] 跳舞兰 H5 后端已启动: http://localhost:${PORT}`)
+  console.log(`[server]   ${biz}`)
+  console.log(`[server]   ${src}（READ_SOURCE=${store}）`)
 })

@@ -51,13 +51,40 @@ function priceUnit() {
   return (process.env.DB_PRICE_UNIT || 'cents').toLowerCase()
 }
 
+// ===================== 静态资源地址归一 =====================
+// ⚠️ aistore 源站按「请求的 Host 头」生成图片绝对 URL：我方后端经 127.0.0.1 直连时
+// 它会写成 http://127.0.0.1:3456/uploads/...（浏览器打不开）。这里统一改写为对外公网基址。
+export const ASSET_BASE = (process.env.STORE_PUBLIC_BASE || 'https://aistore.xiangbinmeigui.com').replace(/\/+$/, '')
+const INNER_HOST_RE = /^https?:\/\/(?:127\.0\.0\.1|localhost|0\.0\.0\.0)(?::\d+)?/i
+
+/** 单个资源地址归一：内网 origin → 公网基址；相对 /uploads 路径 → 补公网基址 */
+export function fixAssetUrl(u) {
+  if (typeof u !== 'string' || !u) return u
+  if (INNER_HOST_RE.test(u)) return u.replace(INNER_HOST_RE, ASSET_BASE)
+  if (u.startsWith('/uploads/')) return ASSET_BASE + u
+  return u
+}
+
+/** 递归归一对象/数组内的资源地址（幂等：已是公网地址的原样返回） */
+export function normalizeAssetUrls(v) {
+  if (Array.isArray(v)) {
+    for (let i = 0; i < v.length; i++) v[i] = normalizeAssetUrls(v[i])
+    return v
+  }
+  if (v && typeof v === 'object') {
+    for (const k of Object.keys(v)) v[k] = normalizeAssetUrls(v[k])
+    return v
+  }
+  return fixAssetUrl(v)
+}
+
 /** 花束行 → 前端花束卡片/详情形状（对齐 mock enrichFlowerItem） */
 export function mapFlowerRow(row, opts = {}) {
   const price = priceCents(pick(row, 'price', 'price_yuan'), priceUnit())
   const originalPrice = priceCents(pick(row, 'original_price', 'originalPrice', 'price_original'), priceUnit())
   const hasDiscount = originalPrice > price
-  const images = parseJsonOrArray(pick(row, 'images', 'imgs'))
-  const image = pick(row, 'image', 'img', 'cover', 'image_url') || (images[0] || '')
+  const images = parseJsonOrArray(pick(row, 'images', 'imgs')).map(fixAssetUrl)
+  const image = fixAssetUrl(pick(row, 'image', 'img', 'cover', 'image_url') || (images[0] || ''))
   const stock = Number(pick(row, 'stock', 'quantity')) || 0
   const sales = Number(pick(row, 'sales', 'sales_volume')) || 0
   const enriched = {
@@ -105,8 +132,8 @@ export function mapShopRow(row) {
   return {
     id: toStr(pick(row, 'id', 'shop_id', 'store_id')),
     name: toStr(pick(row, 'name', 'shop_name', 'store_name')),
-    avatar: pick(row, 'avatar', 'logo', 'cover') || '',
-    cover: pick(row, 'cover', 'avatar') || '',
+    avatar: fixAssetUrl(pick(row, 'avatar', 'logo', 'cover') || ''),
+    cover: fixAssetUrl(pick(row, 'cover', 'avatar') || ''),
     categoryId: toStr(pick(row, 'category_id', 'categoryId')),
     rating: Number(pick(row, 'rating')) || 0,
     ratingCount: Number(pick(row, 'rating_count', 'ratingCount')) || 0,
@@ -185,7 +212,7 @@ export function mapUserRow(row) {
     id: toStr(pick(row, 'id', 'user_id')),
     openid: openid ? '***' : '',
     nickname: toStr(pick(row, 'nickname', 'name', 'user_name')),
-    avatar: pick(row, 'avatar', 'headimgurl', 'avatar_url') || '',
+    avatar: fixAssetUrl(pick(row, 'avatar', 'headimgurl', 'avatar_url') || ''),
     phone: phone ? phone.replace(/(\d{3})\d{4}(\d{4})/, '$1****$2') : '',
     gender: Number(pick(row, 'gender')) || 0,
     country: toStr(pick(row, 'country')),

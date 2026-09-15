@@ -2,7 +2,7 @@
 // 用法：读接口数据源 READ_SOURCE=api（默认）时，index.js 经本模块取数，
 //       复用 mapping.js 的 mapFlowerRow/mapShopRow（aistore camelCase 字段已被 pick() 覆盖，价格=分）。
 // 特性：内存 TTL 缓存（防打爆同事接口）、Node fetch + 超时、code!=0 / HTTP 错误抛异常（由 index.js fail() 统一回退前端 mock）。
-import { mapFlowerRow, mapShopRow } from './mapping.js'
+import { mapFlowerRow, mapShopRow, normalizeAssetUrls } from './mapping.js'
 
 const BASE = (process.env.STORE_API_BASE || 'https://aistore.xiangbinmeigui.com').replace(/\/+$/, '')
 const TIMEOUT = Number(process.env.STORE_TIMEOUT || 8000)
@@ -36,7 +36,8 @@ async function storeFetch(path, params) {
   const j = await res.json()
   if (!j || j.code !== 0) throw new Error('store ' + path + ' code=' + (j && j.code) + ' msg=' + (j && j.message))
   if (j.data === null || j.data === undefined) throw new Error('store ' + path + ' not found')
-  return j.data
+  // 源站按请求 Host 生成图片绝对地址；经本机直连会得到 127.0.0.1 → 统一改写为公网域名
+  return normalizeAssetUrls(j.data)
 }
 
 /** 商品上架判定：aistore 的 status 稀疏（部分商品无此键），仅显式 off 视为下架 */
