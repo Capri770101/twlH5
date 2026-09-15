@@ -129,21 +129,27 @@ async function queryShopFlowers(shopId, shopFlowerIds = []) {
 }
 
 app.get('/api/health', async (req, res) => {
-  // 三路并行探测：flower_shop（旧只读库，已不用但保留状态）/ h5_shop（订单库）/ 业务 API（当前读源）
+  // READ_SOURCE=api 时商品来自 aistore 业务 API，flower_shop 只读库根本不参与 →
+  // 不再去连它（否则会永远报一条误导性的 dbConnected:false）
+  const needFlowerDb = READ_SOURCE !== 'api'
   const [db, h5, storeR] = await Promise.allSettled([
-    query('SELECT 1').then(() => true),
+    needFlowerDb ? query('SELECT 1').then(() => true) : Promise.resolve(null),
     h5DbHealth().then(() => true),
     storeHealth().then(() => true)
   ])
+  const dbConnected = needFlowerDb ? db.status === 'fulfilled' : null
+  const h5Connected = h5.status === 'fulfilled'
+  const storeOk = storeR.status === 'fulfilled'
   res.json({
-    ok: true,
+    ok: h5Connected && storeOk,               // 真正决定 H5 可否使用的两项
     readSource: READ_SOURCE,
-    dbConnected: db.status === 'fulfilled',
-    dbError: db.status === 'fulfilled' ? null : String(db.reason && db.reason.message || db.reason),
-    h5Connected: h5.status === 'fulfilled',
-    h5Error: h5.status === 'fulfilled' ? null : String(h5.reason && h5.reason.message || h5.reason),
-    storeOk: storeR.status === 'fulfilled',
-    storeError: storeR.status === 'fulfilled' ? null : String(storeR.reason && storeR.reason.message || storeR.reason),
+    dbConnected,                              // null = 当前读源不需要该库
+    dbError: !needFlowerDb ? null
+      : (db.status === 'fulfilled' ? null : String(db.reason && db.reason.message || db.reason)),
+    h5Connected,                              // h5_shop 业务库（订单/用户/支付）
+    h5Error: h5Connected ? null : String(h5.reason && h5.reason.message || h5.reason),
+    storeOk,                                  // 商品数据源（aistore API）
+    storeError: storeOk ? null : String(storeR.reason && storeR.reason.message || storeR.reason),
     tables: T, priceUnit: process.env.DB_PRICE_UNIT || 'cents'
   })
 })

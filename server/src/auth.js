@@ -12,11 +12,21 @@ import { hashPassword, verifyPassword, validUsername, validPassword } from './pa
 
 const router = express.Router()
 
+/** 取 MySQL 数字错误码。
+ *  ⚠️ mysql2 的 e.code 是字符串（如 'ER_TABLEACCESS_DENIED_ERROR'），直接 Number() 会得 NaN
+ *  → 用 e.errno（数字）优先，退化为数字型 e.code。 */
+function mysqlErrno(e) {
+  if (!e) return 0
+  if (typeof e.errno === 'number') return e.errno
+  const n = Number(e.code)
+  return Number.isFinite(n) ? n : 0
+}
+
 // 启动即幂等建短信码表。应用账号(h5_app)无 DDL 权限属预期（表由 root 预建），
 // 仅权限类错误静默降噪，其他失败仍告警。
 ensureSmsTable().catch(e => {
-  const c = Number((e && (e.code || e.errno)) || 0)
-  if (![1044, 1045, 1142].includes(c)) console.warn('[auth] sms_codes 建表失败：', e && e.message)
+  const c = mysqlErrno(e)
+  if (![1044, 1045, 1050, 1142].includes(c)) console.warn('[auth] sms_codes 建表失败：', e && e.message)
 })
 
 // 账号密码字段（username / password_hash）应由 root 执行 server/sql/2026-09-15_users_auth.sql 补齐；
@@ -29,8 +39,8 @@ async function ensureUserAuthColumns() {
   ]
   for (const sql of stmts) {
     try { await hq(sql) } catch (e) {
-      const c = Number((e && (e.code || e.errno)) || 0)
-      // 1060 列已存在 / 1061 索引已存在 / 1044·1045·1142 无权限 → 均为预期，跳过
+      const c = mysqlErrno(e)
+      // 1060 列已存在 / 1061 索引已存在 / 1044·1045·1142 无权限（h5_app 无 DDL）→ 均为预期，跳过
       if (![1060, 1061, 1044, 1045, 1142].includes(c)) {
         console.warn('[auth] users 账号字段补齐跳过：', e && e.message)
       }
