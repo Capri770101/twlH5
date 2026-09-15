@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS users (
   openid      VARCHAR(64)     NULL COMMENT '公众号网页授权 openid',
   guest_id    VARCHAR(64)     NULL COMMENT '匿名访客 id（未接微信登录前的过渡身份，兼作 Bearer token）',
   unionid     VARCHAR(64)     NULL COMMENT '开放平台 unionid（可空）',
+  username    VARCHAR(32)     NULL COMMENT '账号（字母开头，4-20 位字母/数字/下划线）',
+  password_hash VARCHAR(255)  NULL COMMENT '密码哈希（scrypt，零依赖）',
   phone       VARCHAR(20)     NULL COMMENT '手机号',
   nickname    VARCHAR(64)     NULL,
   avatar      VARCHAR(512)    NULL,
@@ -29,6 +31,7 @@ CREATE TABLE IF NOT EXISTS users (
   UNIQUE KEY uk_openid (openid),
   UNIQUE KEY uk_guest (guest_id),
   UNIQUE KEY uk_phone (phone),
+  UNIQUE KEY uk_username (username),
   KEY idx_unionid (unionid)
 ) ENGINE = InnoDB COMMENT 'H5 用户';
 

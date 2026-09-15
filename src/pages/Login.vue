@@ -9,48 +9,11 @@
     </div>
 
     <div class="form">
-      <!-- ===== 手机号登录（默认视图；PC 点微信登录后被二维码覆盖） ===== -->
-      <template v-if="wechatEnv || pcView === 'phone'">
-        <div class="field">
-          <span class="field-icon">📱</span>
-          <input class="field-input" type="tel" inputmode="numeric" maxlength="11"
-                 v-model="phone" placeholder="请输入手机号" />
-        </div>
-
-        <div class="field">
-          <span class="field-icon">🔑</span>
-          <input class="field-input" type="tel" inputmode="numeric" maxlength="6"
-                 v-model="code" placeholder="请输入验证码" />
-          <button class="code-btn" :class="{ disabled: sending }" :disabled="sending" @click="onSendCode">
-            {{ sending ? countdown + 's 后重发' : '获取验证码' }}
-          </button>
-        </div>
-
-        <button class="login-btn" :class="{ disabled: !canPhoneLogin }" @click="onPhoneLogin">
-          手机号验证码登录
-        </button>
-
-        <div class="divider"><span>或</span></div>
-
-        <!-- 微信内：一键授权（snsapi_userinfo 完整授权） -->
-        <template v-if="wechatEnv">
-          <button class="login-btn wechat" :class="{ disabled: !agreed }" @click="onWechatLogin">
-            <span class="wb-icon">💬</span> 微信一键登录
-          </button>
-          <p class="env-tip">检测到微信环境，将使用微信授权登录</p>
-        </template>
-
-        <!-- PC / 外部浏览器：点这里才切到二维码，并覆盖上方手机号表单 -->
-        <button v-else class="login-btn wechat" @click="showPcQrView">
-          <span class="wb-icon">💬</span> 微信扫码登录
-        </button>
-      </template>
-
-      <!-- ===== PC 扫码视图（点「微信扫码登录」后展示，覆盖手机号表单） ===== -->
+      <!-- ===== PC 扫码面板（点「微信扫码登录」后覆盖表单） ===== -->
       <div v-if="!wechatEnv && pcView === 'qr'" class="qr-panel">
         <div class="qr-head">
           <span class="qr-title">微信扫码登录</span>
-          <span class="qr-switch" @click="backToPhone">切换手机号登录 ›</span>
+          <span class="qr-switch" @click="backToForm">返回登录 ›</span>
         </div>
         <template v-if="pcUseQrconnect">
           <button class="login-btn wechat" :class="{ disabled: !agreed }" @click="onQrconnectLogin">
@@ -72,8 +35,107 @@
           </div>
           <button v-if="isMobileEnv" class="qr-copy" @click="onCopyLink">复制链接到微信打开</button>
         </template>
-        <button class="qr-back" @click="backToPhone">← 返回手机号登录</button>
+        <button class="qr-back" @click="backToForm">← 返回登录</button>
       </div>
+
+      <!-- ===== 主表单（扫码时不显示） ===== -->
+      <template v-else>
+        <!-- 登录 / 注册 切换 -->
+        <div class="mode-tabs">
+          <button :class="{ active: mode === 'login' }" @click="switchMode('login')">登录</button>
+          <button :class="{ active: mode === 'register' }" @click="switchMode('register')">注册</button>
+        </div>
+
+        <!-- ---------------- 登录 ---------------- -->
+        <template v-if="mode === 'login'">
+          <div class="sub-tabs">
+            <button :class="{ active: loginTab === 'password' }" @click="loginTab = 'password'">账号密码</button>
+            <button :class="{ active: loginTab === 'sms' }" @click="loginTab = 'sms'">验证码登录</button>
+          </div>
+
+          <!-- 账号密码登录 -->
+          <template v-if="loginTab === 'password'">
+            <div class="field">
+              <span class="field-icon">👤</span>
+              <input class="field-input" type="text" autocomplete="username"
+                     v-model="account" placeholder="请输入账号或手机号" />
+            </div>
+            <div class="field">
+              <span class="field-icon">🔒</span>
+              <input class="field-input" type="password" autocomplete="current-password"
+                     v-model="password" placeholder="请输入密码" @keyup.enter="onPasswordLogin" />
+            </div>
+            <button class="login-btn" :class="{ disabled: !canPwdLogin }" @click="onPasswordLogin">登录</button>
+          </template>
+
+          <!-- 手机号验证码登录 -->
+          <template v-else>
+            <div class="field">
+              <span class="field-icon">📱</span>
+              <input class="field-input" type="tel" inputmode="numeric" maxlength="11"
+                     v-model="phone" placeholder="请输入手机号" />
+            </div>
+            <div class="field">
+              <span class="field-icon">🔑</span>
+              <input class="field-input" type="tel" inputmode="numeric" maxlength="6"
+                     v-model="code" placeholder="请输入验证码" />
+              <button class="code-btn" :class="{ disabled: sending }" :disabled="sending" @click="onSendCode('login')">
+                {{ sending ? countdown + 's 后重发' : '获取验证码' }}
+              </button>
+            </div>
+            <button class="login-btn" :class="{ disabled: !canPhoneLogin }" @click="onPhoneLogin">登录</button>
+          </template>
+
+          <div class="divider"><span>或</span></div>
+
+          <!-- 微信内：一键授权（snsapi_userinfo 完整授权） -->
+          <template v-if="wechatEnv">
+            <button class="login-btn wechat" :class="{ disabled: !agreed }" @click="onWechatLogin">
+              <span class="wb-icon">💬</span> 微信一键登录
+            </button>
+            <p class="env-tip">检测到微信环境，将使用微信授权登录</p>
+          </template>
+
+          <!-- PC / 外部浏览器：点这里才切到二维码，并覆盖上方表单 -->
+          <button v-else class="login-btn wechat" @click="showPcQrView">
+            <span class="wb-icon">💬</span> 微信扫码登录
+          </button>
+        </template>
+
+        <!-- ---------------- 注册 ---------------- -->
+        <template v-else>
+          <div class="field">
+            <span class="field-icon">👤</span>
+            <input class="field-input" type="text" maxlength="20" autocomplete="username"
+                   v-model="regUsername" placeholder="设置账号（字母开头，4-20 位）" />
+          </div>
+          <div class="field">
+            <span class="field-icon">🔒</span>
+            <input class="field-input" type="password" maxlength="32" autocomplete="new-password"
+                   v-model="regPassword" placeholder="设置密码（6-32 位）" />
+          </div>
+          <div class="field">
+            <span class="field-icon">🔒</span>
+            <input class="field-input" type="password" maxlength="32" autocomplete="new-password"
+                   v-model="regPassword2" placeholder="确认密码" />
+          </div>
+          <div class="field">
+            <span class="field-icon">📱</span>
+            <input class="field-input" type="tel" inputmode="numeric" maxlength="11"
+                   v-model="regPhone" placeholder="请输入手机号（用于绑定）" />
+          </div>
+          <div class="field">
+            <span class="field-icon">🔑</span>
+            <input class="field-input" type="tel" inputmode="numeric" maxlength="6"
+                   v-model="regCode" placeholder="请输入短信验证码" />
+            <button class="code-btn" :class="{ disabled: sending }" :disabled="sending" @click="onSendCode('register')">
+              {{ sending ? countdown + 's 后重发' : '获取验证码' }}
+            </button>
+          </div>
+          <button class="login-btn" :class="{ disabled: !canRegister }" @click="onRegister">注册并登录</button>
+          <p class="env-tip">注册即绑定手机号，支持账号密码 / 手机号验证码登录</p>
+        </template>
+      </template>
     </div>
 
     <div class="agreement" @click="agreed = !agreed">
@@ -102,7 +164,7 @@ import QRCode from 'qrcode'
 import NavBar from '@/components/NavBar.vue'
 import store, { login } from '@/store'
 import {
-  loginByWechat, loginByWechatPc, loginByPhone, sendSmsCode,
+  loginByWechat, loginByWechatPc, loginByPhone, loginByPassword, registerAccount, sendSmsCode,
   isWechatEnv, buildWechatAuthUrl, buildWechatPcAuthUrl, fetchAuthConfig,
   pcApprove, pcStatus, genPcTicket, WX_APPID
 } from '@/mock/api'
@@ -112,23 +174,56 @@ const route = useRoute()
 const router = useRouter()
 
 const agreed = ref(false)
-const phone = ref('')
-const code = ref('')
 const sending = ref(false)
 const countdown = ref(60)
+const submitting = ref(false)
 const wechatEnv = isWechatEnv()
 let timer = null
 
+// ===== 视图状态：登录 / 注册；登录方式：账号密码 / 验证码 =====
+const mode = ref('login')          // 'login' | 'register'
+const loginTab = ref('password')   // 'password' | 'sms'
 
-const phoneValid = computed(() => /^1[3-9]\d{9}$/.test(phone.value))
+// 账号密码登录
+const account = ref('')
+const password = ref('')
+
+// 手机号验证码登录
+const phone = ref('')
+const code = ref('')
+
+// 注册
+const regUsername = ref('')
+const regPassword = ref('')
+const regPassword2 = ref('')
+const regPhone = ref('')
+const regCode = ref('')
+
+const phoneRe = /^1[3-9]\d{9}$/
+const phoneValid = computed(() => phoneRe.test(phone.value))
 const canPhoneLogin = computed(() => phoneValid.value && /^\d{6}$/.test(code.value))
+const canPwdLogin = computed(() => !!account.value.trim() && !!password.value)
 
-function onSendCode() {
+const usernameValid = computed(() => /^[a-zA-Z][a-zA-Z0-9_]{3,19}$/.test(regUsername.value.trim()))
+const regPwdValid = computed(() => regPassword.value.length >= 6 && regPassword.value.length <= 32)
+const regPhoneValid = computed(() => phoneRe.test(regPhone.value))
+const canRegister = computed(() =>
+  usernameValid.value && regPwdValid.value && regPassword.value === regPassword2.value &&
+  regPhoneValid.value && /^\d{6}$/.test(regCode.value)
+)
+
+function switchMode(m) {
+  mode.value = m
+  if (m === 'register') backToForm() // 注册时关掉扫码面板
+}
+
+function onSendCode(scene = 'login') {
   if (sending.value) return
-  if (!phoneValid.value) { toast('请输入正确的手机号'); return }
+  const target = scene === 'register' ? regPhone.value : phone.value
+  if (!phoneRe.test(target)) { toast('请输入正确的手机号'); return }
   sending.value = true
   countdown.value = 60
-  sendSmsCode(phone.value).then(r => {
+  sendSmsCode(target).then(r => {
     toast(r && r.debug && r.code ? `验证码已发送（测试码：${r.code}）` : '验证码已发送')
     timer = setInterval(() => {
       countdown.value -= 1
@@ -146,12 +241,51 @@ function onSendCode() {
 async function onPhoneLogin() {
   if (!agreed.value) { toast('请先阅读并同意协议'); return }
   if (!canPhoneLogin.value) { toast('请输入手机号和验证码'); return }
+  if (submitting.value) return
+  submitting.value = true
   try {
     const { userInfo, token } = await loginByPhone(phone.value, code.value)
     finishLogin(userInfo, token)
   } catch (e) {
     toast(e.message || '登录失败')
-  }
+  } finally { submitting.value = false }
+}
+
+async function onPasswordLogin() {
+  if (!agreed.value) { toast('请先阅读并同意协议'); return }
+  const acc = account.value.trim()
+  if (!acc) { toast('请输入账号或手机号'); return }
+  if (!password.value) { toast('请输入密码'); return }
+  if (submitting.value) return
+  submitting.value = true
+  try {
+    const { userInfo, token } = await loginByPassword(acc, password.value)
+    finishLogin(userInfo, token)
+  } catch (e) {
+    toast(e.message || '登录失败')
+  } finally { submitting.value = false }
+}
+
+async function onRegister() {
+  if (!agreed.value) { toast('请先阅读并同意协议'); return }
+  if (!usernameValid.value) { toast('账号需字母开头，4-20 位字母/数字/下划线'); return }
+  if (!regPwdValid.value) { toast('密码长度需 6-32 位'); return }
+  if (regPassword.value !== regPassword2.value) { toast('两次输入的密码不一致'); return }
+  if (!regPhoneValid.value) { toast('请输入正确的手机号'); return }
+  if (!/^\d{6}$/.test(regCode.value)) { toast('请输入 6 位短信验证码'); return }
+  if (submitting.value) return
+  submitting.value = true
+  try {
+    const { userInfo, token } = await registerAccount({
+      username: regUsername.value.trim(),
+      password: regPassword.value,
+      phone: regPhone.value,
+      code: regCode.value
+    })
+    finishLogin(userInfo, token)
+  } catch (e) {
+    toast(e.message || '注册失败')
+  } finally { submitting.value = false }
 }
 
 async function onWechatLogin() {
@@ -167,7 +301,7 @@ async function onWechatLogin() {
 
 function finishLogin(userInfo, token) {
   login(userInfo, token)
-  toast('登录成功')
+  toast(mode.value === 'register' ? '注册成功' : '登录成功')
   const redirect = route.query.redirect
   setTimeout(() => {
     if (redirect) router.replace(redirect)
@@ -198,7 +332,7 @@ const pcQrData = ref('')
 const pcQrExpired = ref(false)
 const pcUrl = ref('')
 const pcUseQrconnect = ref(false) // 方案 A 可用时改为官方扫码页
-const pcView = ref('phone')       // 'phone' 手机号表单 | 'qr' 扫码（切换后覆盖表单）
+const pcView = ref('form')        // 'form' 表单 | 'qr' 扫码（切换后覆盖表单）
 const isMobileEnv = /android|iphone|ipad|ipod|windows phone|mobile/i.test(navigator.userAgent || '')
 let pcPollTimer = null
 
@@ -206,7 +340,7 @@ function stopPcPoll() {
   if (pcPollTimer) { clearInterval(pcPollTimer); pcPollTimer = null }
 }
 
-// 生成二维码并开始轮询（内嵌展示，打开登录页即出码，无需点按钮）
+// 生成二维码并开始轮询（内嵌展示）
 async function genPcQr() {
   const ticket = genPcTicket()
   pcQrExpired.value = false
@@ -253,7 +387,7 @@ async function onQrconnectLogin() {
   genPcQr()
 }
 
-// 点「微信扫码登录」→ 切换到扫码视图（覆盖手机号表单）并出码
+// 点「微信扫码登录」→ 切换到扫码视图（覆盖表单）并出码
 async function showPcQrView() {
   pcView.value = 'qr'
   const cfg = await fetchAuthConfig()
@@ -264,13 +398,13 @@ async function showPcQrView() {
   genPcQr() // 方案 B：内嵌二维码 + 轮询
 }
 
-// 返回手机号登录：停止轮询 + 清掉二维码态
-function backToPhone() {
+// 返回表单：停止轮询 + 清掉二维码态
+function backToForm() {
   stopPcPoll()
   pcQrExpired.value = false
   pcQrData.value = ''
   pcUseQrconnect.value = false
-  pcView.value = 'phone'
+  pcView.value = 'form'
 }
 
 async function onCopyLink() {
@@ -374,7 +508,7 @@ onUnmounted(() => {
 
 /* 品牌区 */
 .brand {
-  margin-top: rpx(120);
+  margin-top: rpx(100);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -404,8 +538,62 @@ onUnmounted(() => {
 /* 表单 */
 .form {
   width: 100%;
-  margin-top: rpx(80);
+  margin-top: rpx(56);
 }
+
+/* 登录 / 注册 切换 */
+.mode-tabs {
+  display: flex;
+  width: 100%;
+  margin-bottom: rpx(36);
+  border-bottom: rpx(1) solid var(--border-light);
+}
+.mode-tabs button {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-size: rpx(30);
+  color: var(--text-light);
+  padding: rpx(18) 0;
+  position: relative;
+  &.active {
+    color: var(--text-primary);
+    font-weight: 700;
+    &::after {
+      content: '';
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      bottom: rpx(-1);
+      width: rpx(80);
+      height: rpx(4);
+      border-radius: rpx(4);
+      background: var(--primary);
+    }
+  }
+}
+
+/* 登录方式切换（账号密码 / 验证码） */
+.sub-tabs {
+  display: flex;
+  gap: rpx(16);
+  justify-content: center;
+  margin-bottom: rpx(28);
+}
+.sub-tabs button {
+  border: rpx(1) solid var(--border-light);
+  background: #fff;
+  color: var(--text-secondary);
+  font-size: rpx(24);
+  padding: rpx(10) rpx(28);
+  border-radius: 999rpx;
+  &.active {
+    border-color: var(--primary);
+    color: var(--primary);
+    background: #fdf3f0;
+  }
+}
+
 .field {
   display: flex;
   align-items: center;

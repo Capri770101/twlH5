@@ -8,6 +8,7 @@ import express from 'express'
 import { hq, withTx } from './h5db.js'
 import { signToken, verifyToken } from './token.js'
 import { ensureSmsTable, sendCode, consumeCode, smsMode, validPhone } from './sms.js'
+import { hashPassword, verifyPassword, validUsername, validPassword } from './password.js'
 
 const router = express.Router()
 
@@ -18,6 +19,26 @@ ensureSmsTable().catch(e => {
   if (![1044, 1045, 1142].includes(c)) console.warn('[auth] sms_codes 建表失败：', e && e.message)
 })
 
+// 账号密码字段（username / password_hash）应由 root 执行 server/sql/2026-09-15_users_auth.sql 补齐；
+// 此处仅在有 DDL 权限时尝试自动补列，无权限（h5_app）静默跳过。
+async function ensureUserAuthColumns() {
+  const stmts = [
+    "ALTER TABLE users ADD COLUMN username VARCHAR(32) NULL COMMENT '账号' AFTER unionid",
+    "ALTER TABLE users ADD COLUMN password_hash VARCHAR(255) NULL COMMENT '密码哈希(scrypt)' AFTER username",
+    'ALTER TABLE users ADD UNIQUE KEY uk_username (username)'
+  ]
+  for (const sql of stmts) {
+    try { await hq(sql) } catch (e) {
+      const c = Number((e && (e.code || e.errno)) || 0)
+      // 1060 列已存在 / 1061 索引已存在 / 1044·1045·1142 无权限 → 均为预期，跳过
+      if (![1060, 1061, 1044, 1045, 1142].includes(c)) {
+        console.warn('[auth] users 账号字段补齐跳过：', e && e.message)
+      }
+    }
+  }
+}
+ensureUserAuthColumns().catch(() => {})
+
 // ---------- 展示层用户形状 ----------
 function publicUser(u) {
   return {
@@ -27,7 +48,9 @@ function publicUser(u) {
     phone: u.phone || '',
     openid: u.openid || '',
     unionid: u.unionid || '',
-    guest: !u.phone && !u.openid && !u.unionid
+    username: u.username || '',
+    hasPassword: !!u.password_hash,
+    guest: !u.phone && !u.openid && !u.unionid && !u.username
   }
 }
 
@@ -201,6 +224,87 @@ router.post('/sms/login', async (req, res) => {
     const status = (e && e.status) || 500
     if (status >= 500) console.error('[auth] sms/login 失败：', e && e.message)
     res.status(status).json({ error: (e && e.message) || '登录失败' })
+  }
+})
+
+// ==================== 账号 + 密码（注册 / 登录） ====================
+// POST /api/auth/register { username, password, phone, code, guestId?, bindUserId?, nickname? }
+//   注册即绑定手机号（短信验证码校验），成功后直接签发 JWT 登录。
+//   规则：账号唯一；手机号若已注册则复用该行（未设过账号密码时为其补设），避免重复开号。
+router.post('/register', async (req, res) => {
+  const username = String((req.body && req.body.username) || '').trim()
+  const password = String((req.body && req.body.password) || '')
+  const phone = String((req.body && req.body.phone) || '').trim()
+  const code = String((req.body && req.body.code) || '').trim()
+  const nickname = String((req.body && req.body.nickname) || '').slice(0, 32)
+  const guestId = String((req.body && req.body.guestId) || '').trim() || null
+  const bindUserId = (req.body && req.body.bindUserId) || ''
+
+  if (!validUsername(username)) return res.status(400).json({ error: '账号需字母开头，4-20 位字母/数字/下划线' })
+  if (!validPassword(password)) return res.status(400).json({ error: '密码长度需 6-32 位' })
+  if (!validPhone(phone)) return res.status(400).json({ error: '手机号格式不正确' })
+  if (!/^\d{6}$/.test(code)) return res.status(400).json({ error: '验证码为 6 位数字' })
+
+  try {
+    await assertCanBind(req, bindUserId) // bindUserId 需对应 JWT（防越权合并）
+    await consumeCode(phone, code)       // 手机号短信校验并消费
+    const user = await withTx(async conn => {
+      const [[uExist]] = await conn.query('SELECT id FROM users WHERE username = ? FOR UPDATE', [username])
+      if (uExist) throw { status: 409, message: '该账号已被注册，请更换' }
+      const [[pExist]] = await conn.query('SELECT * FROM users WHERE phone = ? FOR UPDATE', [phone])
+      const self = await findSelf(conn, bindUserId)
+      let main
+      if (pExist) {
+        // 手机号已存在：若该行还没设账号，则为其补设（升级为账号密码登录）；已有别的账号则拒绝
+        if (pExist.username && pExist.username !== username) {
+          throw { status: 409, message: '该手机号已注册，请直接登录' }
+        }
+        main = pExist
+      } else if (self && !self.phone) {
+        main = self // 复用当前匿名壳，保留其订单 / 地址
+      } else {
+        const r = await conn.query('INSERT INTO users (phone) VALUES (?)', [phone])
+        main = { id: r[0].insertId }
+      }
+      // 匿名壳（若与主行不同）并入主行，避免双账号
+      if (self && self.id !== main.id && !self.phone) await mergeRow(conn, self.id, main.id)
+      await conn.query(
+        'UPDATE users SET username = ?, password_hash = ?, phone = ?, nickname = COALESCE(NULLIF(?, ""), nickname) WHERE id = ?',
+        [username, hashPassword(password), phone, nickname, main.id]
+      )
+      const [[row]] = await conn.query('SELECT * FROM users WHERE id = ?', [main.id])
+      return row
+    })
+    console.log('[auth/register] 注册成功: uid=%s username=%s', user.id, username)
+    res.json({ token: signToken(user.id), user: publicUser(user) })
+  } catch (e) {
+    const status = (e && e.status) || 500
+    if (status >= 500) console.error('[auth/register] 失败：', e && e.message)
+    res.status(status).json({ error: (e && e.message) || '注册失败' })
+  }
+})
+
+// POST /api/auth/password/login { account, password }
+//   account 支持「账号」或「手机号」；错误统一提示，避免账号枚举。
+router.post('/password/login', async (req, res) => {
+  const account = String((req.body && req.body.account) || '').trim()
+  const password = String((req.body && req.body.password) || '')
+  if (!account || !password) return res.status(400).json({ error: '请输入账号和密码' })
+  try {
+    const isPhone = validPhone(account)
+    const sql = isPhone
+      ? 'SELECT * FROM users WHERE phone = ? LIMIT 1'
+      : 'SELECT * FROM users WHERE username = ? LIMIT 1'
+    const rows = await hq(sql, [account])
+    const row = rows && rows[0]
+    if (!row || !row.password_hash || !verifyPassword(password, row.password_hash)) {
+      return res.status(401).json({ error: '账号或密码错误' })
+    }
+    console.log('[auth/password/login] 登录成功: uid=%s account=%s', row.id, isPhone ? 'phone' : 'username')
+    res.json({ token: signToken(row.id), user: publicUser(row) })
+  } catch (e) {
+    console.error('[auth/password/login] 失败：', e && e.message)
+    res.status(500).json({ error: '登录失败' })
   }
 })
 
