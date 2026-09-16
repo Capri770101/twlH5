@@ -1,21 +1,42 @@
 <template>
   <div class="advisor-page">
-    <NavBar title="AI花艺顾问" />
+    <!-- 报头：返回 + 品牌 + 连接状态 + 对话管理 + 新对话 -->
+    <header class="masthead">
+      <button class="back-btn" aria-label="返回" @click="goBack">
+        <span class="arrow-back"></span>
+      </button>
 
-    <!-- 对话管理入口 + 连接状态 + 新对话 -->
-    <div class="advisor-status">
-      <span class="conv-toggle" @click="drawerOpen = !drawerOpen">≡</span>
-      <span class="status-dot" :class="agentMode"></span>
-      <span class="status-text">{{ agentMode === 'real' ? '已连接智能体' : '演示模式（未连接智能体）' }}</span>
-      <span class="new-chat" @click="newConversation">新对话</span>
-    </div>
+      <div class="brand">
+        <svg class="mark" viewBox="0 0 40 40" aria-hidden="true">
+          <path d="M20 34V15" />
+          <path d="M20 21c0-5.2 3.6-9.4 8.4-10.4C27.4 16.4 24.4 20.2 20 21z" />
+          <path d="M20 26.5c0-4.2-2.9-7.5-6.8-8.3.6 4.5 3.2 7.6 6.8 8.3z" />
+          <circle class="fill" cx="20" cy="10.4" r="3.1" />
+        </svg>
+        <span class="brand-text">
+          <span class="brand-title">花艺小助手</span>
+          <span class="brand-sub">Botanical Atelier</span>
+        </span>
+      </div>
+
+      <div class="masthead-actions">
+        <span class="status" :class="agentMode">
+          <i></i><span class="status-text">{{ agentMode === 'real' ? '已连接' : '演示模式' }}</span>
+        </span>
+        <button class="icon-btn" aria-label="对话管理" @click="drawerOpen = true">≡</button>
+        <button class="btn-ghost" @click="newConversation">新对话</button>
+      </div>
+    </header>
 
     <!-- 对话管理抽屉 -->
     <div class="conv-mask" v-if="drawerOpen" @click="drawerOpen = false"></div>
-    <div class="conv-drawer" :class="{ open: drawerOpen }">
+    <aside class="conv-drawer" :class="{ open: drawerOpen }">
       <div class="conv-drawer-head">
-        <span>对话管理</span>
-        <span class="conv-drawer-close" @click="drawerOpen = false">✕</span>
+        <span class="drawer-head-text">
+          <span class="kicker">Conversations</span>
+          <span class="drawer-title">对话管理</span>
+        </span>
+        <button class="icon-btn" aria-label="关闭" @click="drawerOpen = false">✕</button>
       </div>
       <div class="conv-list">
         <div
@@ -31,136 +52,163 @@
           </div>
           <div class="conv-item-actions">
             <span class="conv-act" @click.stop="renameConversation(c.id)" title="重命名">✎</span>
-            <span class="conv-act conv-del" @click.stop="deleteConversation(c.id)" title="删除">🗑</span>
+            <span class="conv-act conv-del" @click.stop="deleteConversation(c.id)" title="删除">✕</span>
           </div>
         </div>
+        <div v-if="!conversations.length" class="conv-empty">还没有对话记录</div>
       </div>
-      <div class="conv-new" @click="newConversation">＋ 新建对话</div>
-    </div>
+      <button class="conv-new" @click="newConversation">＋ 新建对话</button>
+    </aside>
 
     <!-- 场景预设 -->
-    <div v-if="presets.length" class="preset-scroll">
-      <div
+    <div v-if="presets.length" class="chips-row">
+      <button
         v-for="p in presets"
         :key="p.key"
-        class="preset-chip"
+        class="chip-btn"
         @click="usePreset(p)"
-      >{{ p.label }}</div>
+      >{{ p.label }}</button>
     </div>
 
-    <!-- 聊天区 -->
-    <div ref="listEl" class="chat-list">
-      <div
-        v-for="(m, i) in messages"
-        :key="i"
-        class="msg"
-        :class="m.role"
-      >
-        <div class="avatar" :class="m.role">{{ m.role === 'ai' ? 'AI' : '我' }}</div>
-        <div class="bubble">
-          <div class="msg-text">{{ m.text }}<span v-if="m.streaming" class="stream-caret"></span></div>
+    <!-- 对话区：唯一的滚动容器 -->
+    <main ref="listEl" class="stage">
+      <div class="log">
+        <div
+          v-for="(m, i) in messages"
+          :key="i"
+          class="rise"
+          :class="m.role === 'user' ? 'msg-user' : 'msg-bot'"
+        >
+          <!-- 用户消息：右侧墨绿气泡 -->
+          <div v-if="m.role === 'user'" class="bubble">{{ m.text }}</div>
 
-          <!-- 流式状态：工具调用 / 思考中 -->
-          <div v-if="m.streaming && !m.text" class="stream-hint">
-            <span v-if="m.tools && m.tools.length">正在{{ toolLabel(m.tools[m.tools.length - 1]) }}…</span>
-            <span v-else>正在思考…</span>
-          </div>
-          <div v-else-if="m.streaming && m.tools && m.tools.length" class="stream-hint small">
-            正在{{ toolLabel(m.tools[m.tools.length - 1]) }}…
-          </div>
+          <!-- 助手消息：无气泡排版 -->
+          <template v-else>
+            <div class="who">花艺小助手</div>
 
-          <!-- 结构化卡片（流式 card 事件：方案/订单/店铺/支付/贺卡/生图/选项） -->
-          <AdvisorCards
-            v-for="(c, ci) in (m.cards || [])"
-            :key="ci"
-            :card="c"
-            @buy="onCardBuy"
-            @send="sendOption"
-            @pay="onCardPay"
-            @order="onCardOrder"
-            @view-order="onViewOrder"
-            @save-diy-plan="onSaveDiyPlan"
-            @go-shop="onGoShop"
-            @go-detail="onGoDetail"
-          />
+            <div v-if="m.text" class="say">{{ m.text }}<span v-if="m.streaming" class="caret"></span></div>
 
-          <!-- 效果图（轮询任务回填） -->
-          <div v-if="m.image" class="ai-effect">
-            <FlowerImage :src="m.image" :emoji="'🌸'" class="ai-effect-img" />
-          </div>
+            <!-- 流式状态：思考中 / 工具调用 -->
+            <div v-if="m.streaming && !m.text" class="thinking-line">
+              <span class="think-dots"><i></i><i></i><i></i></span>
+              <span v-if="m.tools && m.tools.length">正在{{ toolLabel(m.tools[m.tools.length - 1]) }}…</span>
+              <span v-else>正在构思…</span>
+            </div>
+            <div v-else-if="m.streaming && m.tools && m.tools.length" class="tool-line">
+              正在{{ toolLabel(m.tools[m.tools.length - 1]) }}…
+            </div>
 
-          <!-- DIY 方案卡（真实智能体 plan_card / tool_calls） -->
-          <div v-if="m.plans && m.plans.length" class="ai-plans">
-            <div
-              v-for="plan in m.plans"
-              :key="plan.id"
-              class="ai-plan-card"
-            >
-              <FlowerImage :src="plan.image" :emoji="'💐'" class="ai-plan-image" />
-              <div class="ai-plan-body">
-                <div class="ai-plan-name">{{ plan.name }}</div>
-                <div v-if="plan.desc" class="ai-plan-desc">{{ plan.desc }}</div>
-                <div class="ai-plan-foot">
-                  <span class="ai-plan-price">¥{{ yuan(plan.priceText) }}</span>
-                  <span class="ai-plan-buy" @click="buyPlan(plan)">加入购物车</span>
+            <!-- 结构化卡片（方案/订单/店铺/支付/贺卡/生图/选项） -->
+            <AdvisorCards
+              v-for="(c, ci) in (m.cards || [])"
+              :key="ci"
+              :card="c"
+              @buy="onCardBuy"
+              @send="sendOption"
+              @pay="onCardPay"
+              @order="onCardOrder"
+              @view-order="onViewOrder"
+              @save-diy-plan="onSaveDiyPlan"
+              @go-shop="onGoShop"
+              @go-detail="onGoDetail"
+            />
+
+            <!-- 效果图（轮询任务回填） -->
+            <figure v-if="m.image" class="frame">
+              <FlowerImage :src="m.image" :emoji="'🌸'" class="frame-img" />
+              <figcaption class="frame-cap"><span>效果图</span><b>AI 生成</b></figcaption>
+            </figure>
+
+            <!-- DIY 方案卡（真实智能体 plan_card / tool_calls） -->
+            <div v-if="m.plans && m.plans.length" class="prods">
+              <article
+                v-for="plan in m.plans"
+                :key="plan.id"
+                class="prod"
+              >
+                <div class="prod-img">
+                  <FlowerImage :src="plan.image" :emoji="'💐'" class="prod-img-inner" />
                 </div>
-              </div>
+                <div class="prod-body">
+                  <div class="prod-name">{{ plan.name }}</div>
+                  <div v-if="plan.desc" class="prod-sub">{{ plan.desc }}</div>
+                  <div class="prod-foot">
+                    <span class="prod-price">¥{{ yuan(plan.priceText) }}</span>
+                    <button class="act" @click="buyPlan(plan)">立即结算</button>
+                  </div>
+                </div>
+              </article>
             </div>
-          </div>
 
-          <!-- 推荐商品（mock 兜底，跳详情/购买） -->
-          <div v-if="m.products && m.products.length" class="ai-products">
-            <div
-              v-for="product in m.products"
-              :key="product.id"
-              class="ai-product-card"
-              @click="goDetail(product)"
-            >
-              <FlowerImage :src="product.image" :emoji="'💐'" class="ai-product-image" />
-              <div class="ai-product-info">
-                <div class="ai-product-name">{{ product.name }}</div>
-                <div class="ai-product-price">¥{{ yuan(product.priceText) }}</div>
-              </div>
-              <div class="ai-product-buy" @click.stop="buy(product)">立即购买</div>
+            <!-- 推荐商品（mock 兜底，跳详情/购买） -->
+            <div v-if="m.products && m.products.length" class="prods">
+              <article
+                v-for="product in m.products"
+                :key="product.id"
+                class="prod"
+                @click="goDetail(product)"
+              >
+                <div class="prod-img">
+                  <FlowerImage :src="product.image" :emoji="'💐'" class="prod-img-inner" />
+                </div>
+                <div class="prod-body">
+                  <div class="prod-name">{{ product.name }}</div>
+                  <div class="prod-foot">
+                    <span class="prod-price">¥{{ yuan(product.priceText) }}</span>
+                    <button class="act" @click.stop="buy(product)">立即结算</button>
+                  </div>
+                </div>
+              </article>
             </div>
-          </div>
 
-          <!-- 选项 chips（真实智能体 dialog_options） -->
-          <div v-if="m.options && m.options.length" class="ai-options">
-            <div
-              v-for="(opt, oi) in m.options"
-              :key="oi"
-              class="ai-option-chip"
-              @click="sendOption(opt.value)"
-            >{{ opt.label }}</div>
-          </div>
+            <!-- 选项 chips（真实智能体 dialog_options） -->
+            <div v-if="m.options && m.options.length" class="ai-options">
+              <button
+                v-for="(opt, oi) in m.options"
+                :key="oi"
+                class="opt-chip"
+                @click="sendOption(opt.value)"
+              >{{ opt.label }}</button>
+            </div>
+          </template>
         </div>
       </div>
+    </main>
 
-    </div>
-
-    <!-- 输入框 -->
-    <div class="input-row" :style="{ bottom: 'calc(env(safe-area-inset-bottom))' }">
-      <textarea
-        v-model="inputText"
-        class="chat-input"
-        :auto-height="true"
-        maxlength="160"
-        rows="1"
-        :placeholder="placeholder"
-        @keydown.enter.exact.prevent="sendMessage"
-      ></textarea>
-      <div
-        v-if="generating"
-        class="send-btn stop"
-        @click="stopGenerate"
-      >停止</div>
-      <div
-        v-else
-        class="send-btn"
-        @click="sendMessage"
-      >发送</div>
-    </div>
+    <!-- 输入区 -->
+    <footer class="composer">
+      <div class="input-row">
+        <div class="input-wrap">
+          <textarea
+            v-model="inputText"
+            class="chat-input"
+            :auto-height="true"
+            maxlength="160"
+            rows="1"
+            :placeholder="placeholder"
+            @keydown.enter.exact.prevent="sendMessage"
+          ></textarea>
+        </div>
+        <button
+          v-if="generating"
+          class="send stop"
+          aria-label="停止生成"
+          @click="stopGenerate"
+        >
+          <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="6.2" y="6.2" width="7.6" height="7.6" rx="1.6" /></svg>
+        </button>
+        <button
+          v-else
+          class="send"
+          aria-label="发送"
+          :disabled="!inputText.trim()"
+          @click="sendMessage"
+        >
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h11" /><path d="M10.6 5.6 15 10l-4.4 4.4" /></svg>
+        </button>
+      </div>
+      <p class="foot-note">花材与价格以店家实际确认为准 · <b>跳舞兰</b></p>
+    </footer>
   </div>
 </template>
 
@@ -179,6 +227,12 @@ import { extractDiyPlan, isDiyScene } from '@/utils/extractDiyPlan'
 import { toast } from '@/utils/toast'
 
 const router = useRouter()
+
+/** 报头返回（替代原来的 NavBar 返回；无历史时回首页） */
+const goBack = () => {
+  if (window.history.length > 1) router.back()
+  else router.push({ name: 'home' })
+}
 
 const presets = ADVISOR_PRESETS
 const placeholder = '说说送花对象、关系和想表达的心情…'
@@ -437,7 +491,9 @@ function stopGenerate() {
 }
 
 // ===== 卡片交互 =====
-// 方案卡：加入购物车 / 立即购买
+// 方案卡两个按钮的语义必须可区分：
+//   加购（mode='cart'）→ 只进购物车，留在对话里继续挑（可凑单/一起结算）
+//   结算（mode='now'） → 进购物车并直接跳结算页，省一步
 function onCardBuy({ item, mode }) {
   if (!item) return
   addToCart({
@@ -450,10 +506,10 @@ function onCardBuy({ item, mode }) {
     quantity: 1
   })
   if (mode === 'now') {
-    toast('已加入购物车，去结算')
+    toast('已加入购物车，正在去结算')
     setTimeout(() => router.push({ name: 'checkout' }), 280)
   } else {
-    toast('已加入购物车')
+    toast('已加入购物车，可以继续挑')
   }
 }
 
@@ -634,106 +690,262 @@ onMounted(() => {
 </script>
 
 <style scoped lang="scss">
+/* ══════════════════════════════════════════════════════════════
+   AI 花艺顾问 —— 「花艺标本册」风格（对齐 api.tiaowulan.com/demo）
+   暖象牙纸底 · 墨绿主色 · 黄铜细线 · 衬线标题 + 无衬线正文
+   全部 token 收在本页作用域，不影响其它页面。
+   尺寸：demo 的 px 按 2× 映射为 rpx（1rem = 750rpx = 容器宽）
+   ══════════════════════════════════════════════════════════════ */
 .advisor-page {
-  min-height: 100vh;
+  --paper: #f5f1e9;
+  --paper-2: #fdfbf7;
+  --paper-3: #efeae0;
+  --ink: #1e1c19;
+  --ink-2: #5b554b;
+  --ink-3: #8e877b;
+  --moss: #2b4133;
+  --moss-2: #3d5a49;
+  --moss-3: #6b8574;
+  --brass: #a58449;
+  --brass-2: #c8ac79;
+  --line: #e4dcce;
+  --line-2: #d3c8b4;
+  --danger: #8e3b33;
+  --font-display: "Songti SC", "Source Han Serif SC", "Noto Serif CJK SC", "STSong", "SimSun", Georgia, serif;
+  --font-num: Georgia, "Times New Roman", var(--font-body, inherit);
+
+  /* ⚠️ 关键：固定视口高度 + 不整页滚动。
+     原来 min-height:100vh 导致 chat-list 不产生内部滚动、整页变长 → 输入框错位/内容溢出。 */
+  position: relative;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
-  background: #fff;
-  box-sizing: border-box;
+  overflow: hidden;
+  isolation: isolate;
+  color: var(--ink);
+  font-family: var(--font-body);
+  line-height: 1.7;
+  background-color: var(--paper);
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='.34'/%3E%3C/svg%3E"),
+    radial-gradient(120% 58% at 8% -8%, #fcf8f0 0%, transparent 58%),
+    radial-gradient(92% 48% at 104% -2%, #efe8db 0%, transparent 52%);
+  background-blend-mode: multiply, normal, normal;
 }
 
-.advisor-status {
+/* ── 报头（承接原 NavBar + 状态栏）── */
+.masthead {
+  flex: none;
   display: flex;
   align-items: center;
   gap: rpx(12);
-  padding: rpx(12) rpx(24);
-  font-size: rpx(24);
-  color: #8a8276;
-  background: #faf8f4;
-  border-bottom: 1rpx solid #f1eee9;
+  padding: rpx(24) rpx(40) rpx(20);
+  border-bottom: 1rpx solid var(--line-2);
+  position: relative;
+  background: transparent;
 }
-.status-dot {
-  width: rpx(14);
-  height: rpx(14);
-  border-radius: 50%;
-  background: #c9c2b6;
-  flex: none;
-  &.real { background: #38b865; }
-  &.demo { background: #f0a93a; }
+.masthead::after {
+  content: "";
+  position: absolute;
+  left: rpx(40);
+  right: rpx(40);
+  bottom: rpx(-5);
+  height: 1rpx;
+  background: var(--line);
 }
-.status-text { flex: 1; }
-.new-chat {
+.back-btn {
   flex: none;
-  color: #d98a3a;
-  font-weight: 600;
-  padding: rpx(6) rpx(16);
-  border: 1rpx solid #f0c98a;
-  border-radius: rpx(999);
-}
-
-/* 对话管理入口 + 抽屉 */
-.conv-toggle {
-  flex: none;
-  width: rpx(48);
-  height: rpx(48);
+  width: rpx(58);
+  height: rpx(58);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: rpx(40);
-  line-height: 1;
-  color: #5c524d;
-  border-radius: rpx(10);
-  background: #fff;
-  border: 1rpx solid #ebe6df;
+  border: 1rpx solid var(--line-2);
+  border-radius: rpx(22);
+  background: var(--paper-2);
+  cursor: pointer;
+  transition: 0.22s;
 }
+.back-btn:active { background: #edf1ec; border-color: var(--moss-3); }
+.back-btn .arrow-back {
+  width: rpx(18);
+  height: rpx(18);
+  border-left-width: rpx(4);
+  border-bottom-width: rpx(4);
+  border-color: var(--moss);
+  margin-left: rpx(-4);
+}
+
+/* ⚠️ 报头是 flex 行且子项 nowrap：必须给 brand / brand-text 显式 min-width:0
+   并允许省略号，否则窄容器下文字会溢出盒子、压到右侧按钮上。 */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: rpx(12);
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.mark { flex: none; width: rpx(50); height: rpx(50); }
+.mark path,
+.mark circle { stroke: var(--moss); fill: none; stroke-width: 1.25; stroke-linecap: round; }
+.mark .fill { fill: var(--brass); stroke: none; }
+.brand-text { display: flex; flex-direction: column; min-width: 0; }
+.brand-title {
+  font-family: var(--font-display);
+  font-size: rpx(32);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  line-height: 1.2;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.brand-sub {
+  font-family: var(--font-num);
+  font-size: rpx(16);
+  color: var(--ink-3);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin-top: rpx(4);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.masthead-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: rpx(10);
+}
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: rpx(10);
+  font-size: rpx(19);
+  color: var(--ink-2);
+  letter-spacing: 0.04em;
+  padding: rpx(8) rpx(16);
+  border: 1rpx solid var(--line-2);
+  border-radius: rpx(999);
+  background: var(--paper-2);
+  white-space: nowrap;
+}
+.status i {
+  width: rpx(11);
+  height: rpx(11);
+  border-radius: 50%;
+  background: var(--ink-3);
+  flex: none;
+  transition: background 0.3s;
+}
+.status.real i { background: var(--moss-3); }
+.status.demo i { background: var(--brass); }
+.icon-btn {
+  width: rpx(56);
+  height: rpx(56);
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: rpx(30);
+  line-height: 1;
+  color: var(--ink-2);
+  background: var(--paper-2);
+  border: 1rpx solid var(--line-2);
+  border-radius: rpx(22);
+  cursor: pointer;
+  transition: 0.22s;
+}
+.icon-btn:active { color: var(--moss); border-color: var(--moss-3); background: #edf1ec; }
+.btn-ghost {
+  font-family: inherit;
+  font-size: rpx(21);
+  letter-spacing: 0.04em;
+  color: var(--ink-2);
+  background: none;
+  border: 1rpx solid var(--line-2);
+  border-radius: rpx(999);
+  padding: rpx(10) rpx(18);
+  cursor: pointer;
+  transition: 0.22s;
+  white-space: nowrap;
+}
+.btn-ghost:active { color: var(--moss); border-color: var(--moss-3); background: var(--paper-2); }
+
+/* ── 对话管理抽屉（absolute：跟随容器，不用 fixed/vw）── */
 .conv-mask {
-  position: fixed;
+  position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  z-index: 1100;
+  background: rgba(30, 28, 25, 0.42);
+  z-index: 20;
+  animation: adv-fade 0.24s ease-out;
 }
 .conv-drawer {
-  position: fixed;
+  position: absolute;
   top: 0;
   bottom: 0;
   left: 0;
-  width: rpx(580);
-  max-width: 82%;
-  background: #fff;
-  z-index: 1101;
-  transform: translateX(-100%);
-  transition: transform 0.28s ease;
+  width: 78%;
+  max-width: rpx(600);
+  z-index: 21;
   display: flex;
   flex-direction: column;
-  box-shadow: rpx(8) 0 rpx(40) rgba(0, 0, 0, 0.12);
+  background: var(--paper-2);
+  border-right: 1rpx solid var(--line-2);
+  box-shadow: rpx(10) 0 rpx(60) rgba(30, 28, 25, 0.14);
+  transform: translateX(-100%);
+  transition: transform 0.3s cubic-bezier(0.2, 0.7, 0.3, 1);
 }
 .conv-drawer.open { transform: translateX(0); }
 .conv-drawer-head {
+  flex: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: rpx(28) rpx(28) rpx(20);
-  font-size: rpx(32);
-  font-weight: 700;
-  color: var(--text-primary);
-  border-bottom: 1rpx solid #f1eee9;
+  gap: rpx(16);
+  padding: rpx(36) rpx(32) rpx(24);
+  border-bottom: 1rpx solid var(--line);
 }
-.conv-drawer-close { font-size: rpx(34); color: var(--text-light); }
+.drawer-head-text { display: flex; flex-direction: column; min-width: 0; }
+.kicker {
+  font-family: var(--font-num);
+  font-size: rpx(18);
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  color: var(--brass);
+}
+.drawer-title {
+  font-family: var(--font-display);
+  font-size: rpx(34);
+  font-weight: 600;
+  color: var(--ink);
+  margin-top: rpx(4);
+  letter-spacing: 0.04em;
+}
 .conv-list {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: rpx(12) rpx(16);
+  padding: rpx(16) rpx(18);
 }
 .conv-item {
   display: flex;
   align-items: center;
-  gap: rpx(12);
-  padding: rpx(22) rpx(18);
-  border-radius: rpx(16);
+  gap: rpx(16);
+  padding: rpx(22) rpx(20);
+  border-radius: rpx(24);
+  border: 1rpx solid transparent;
   cursor: pointer;
-  &:active { background: #faf8f4; }
-  &.active { background: #fdeee9; }
+  transition: 0.2s;
+}
+.conv-item:active { background: var(--paper-3); }
+.conv-item.active {
+  background: #edf1ec;
+  border-color: var(--line-2);
 }
 .conv-item-main {
   flex: 1;
@@ -743,13 +955,13 @@ onMounted(() => {
   gap: rpx(6);
 }
 .conv-item-title {
-  font-size: rpx(28);
-  font-weight: 600;
-  color: var(--text-primary);
+  font-size: rpx(26);
+  font-weight: 500;
+  color: var(--ink);
 }
 .conv-item-preview {
-  font-size: rpx(22);
-  color: var(--text-light);
+  font-size: rpx(21);
+  color: var(--ink-3);
 }
 .conv-item-actions {
   display: flex;
@@ -758,313 +970,429 @@ onMounted(() => {
   flex-shrink: 0;
 }
 .conv-act {
-  width: rpx(56);
-  height: rpx(56);
+  width: rpx(54);
+  height: rpx(54);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: rpx(28);
-  border-radius: rpx(12);
-  background: #f7f5f2;
-  color: #8a8276;
-}
-.conv-del { color: #d9534f; }
-.conv-new {
-  flex-shrink: 0;
-  margin: rpx(16) rpx(16) calc(#{rpx(16)} + env(safe-area-inset-bottom));
-  height: rpx(88);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: rpx(16);
-  background: var(--primary-gradient);
-  color: #fff;
-  font-size: rpx(30);
-  font-weight: 600;
-}
-
-.preset-scroll {
-  display: flex;
-  gap: rpx(14);
-  padding: rpx(16) rpx(24);
-  overflow-x: auto;
-  white-space: nowrap;
-  border-bottom: 1rpx solid #f1eee9;
-  -webkit-overflow-scrolling: touch;
-}
-.preset-chip {
-  flex: 0 0 auto;
-  padding: rpx(12) rpx(22);
-  border-radius: 999rpx;
-  color: #5c524d;
-  background: #fff;
   font-size: rpx(24);
-  border: 1rpx solid #ebe6df;
+  border-radius: rpx(20);
+  background: var(--paper-3);
+  color: var(--ink-3);
   cursor: pointer;
 }
+.conv-del { color: var(--danger); }
+.conv-empty {
+  padding: rpx(40) rpx(20);
+  text-align: center;
+  font-size: rpx(23);
+  color: var(--ink-3);
+}
+.conv-new {
+  flex: none;
+  font-family: inherit;
+  font-size: rpx(27);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  margin: rpx(18) rpx(20) calc(#{rpx(20)} + env(safe-area-inset-bottom));
+  min-height: rpx(86);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1rpx solid var(--moss);
+  border-radius: rpx(999);
+  background: var(--moss);
+  color: #f4f2ea;
+  cursor: pointer;
+  transition: 0.22s;
+}
+.conv-new:active { background: var(--moss-2); border-color: var(--moss-2); }
 
-.chat-list {
+/* ── 场景预设 ── */
+.chips-row {
+  flex: none;
+  display: flex;
+  gap: rpx(14);
+  padding: rpx(20) rpx(40);
+  overflow-x: auto;
+  white-space: nowrap;
+  border-bottom: 1rpx solid var(--line);
+  scrollbar-width: none;
+}
+.chips-row::-webkit-scrollbar { display: none; }
+.chip-btn {
+  flex: 0 0 auto;
+  font-family: inherit;
+  font-size: rpx(22);
+  letter-spacing: 0.03em;
+  color: var(--ink-2);
+  background: var(--paper-2);
+  border: 1rpx solid var(--line-2);
+  border-radius: rpx(999);
+  padding: rpx(10) rpx(26);
+  cursor: pointer;
+  transition: 0.2s;
+}
+.chip-btn:active { color: var(--moss); border-color: var(--moss-3); background: #edf1ec; }
+
+/* ── 对话区：唯一滚动容器 ── */
+.stage {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: rpx(20) rpx(24) calc(#{rpx(140)} + env(safe-area-inset-bottom));
-  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  padding: rpx(46) rpx(40) rpx(28);
+  scrollbar-width: thin;
+}
+.stage::-webkit-scrollbar { width: rpx(10); }
+.stage::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: rpx(999); }
+.log {
+  display: flex;
+  flex-direction: column;
+  gap: rpx(46);
 }
 
-.msg {
-  display: flex;
-  gap: rpx(14);
-  margin-bottom: rpx(24);
+.rise { animation: adv-rise 0.5s cubic-bezier(0.2, 0.7, 0.3, 1) both; }
+@keyframes adv-rise {
+  from { opacity: 0; transform: translateY(rpx(18)); }
+  to { opacity: 1; transform: none; }
 }
-.msg.user {
-  flex-direction: row-reverse;
+@keyframes adv-fade { from { opacity: 0; } to { opacity: 1; } }
+
+/* 用户消息 */
+.msg-user {
+  align-self: flex-end;
+  /* ⚠️ 原来写的是 76vw —— 宽屏下会远超容器宽（容器被限制在 ≤480px）导致横向溢出，这里改用容器百分比 */
+  max-width: 82%;
 }
-.avatar {
-  width: rpx(56);
-  height: rpx(56);
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  font-size: rpx(22);
-  font-weight: 900;
-}
-.avatar.ai {
-  background: #eef8f6;
-  color: #168278;
-}
-.avatar.user {
-  background: #fff0f0;
-  color: #d94f4b;
-}
-.bubble {
-  max-width: 76vw;
-  padding: rpx(18) rpx(24);
-  border-radius: rpx(26);
-  background: #f8f6f3;
-  color: #4e4641;
-  font-size: rpx(27);
-  line-height: 1.55;
+.msg-user .bubble {
+  background: var(--moss);
+  color: #f3f1ea;
+  padding: rpx(22) rpx(32);
+  border-radius: rpx(30) rpx(30) rpx(8) rpx(30);
+  font-size: rpx(30);
+  line-height: 1.6;
+  box-shadow: 0 rpx(2) rpx(4) rgba(30, 28, 25, 0.06), 0 rpx(8) rpx(22) rgba(30, 28, 25, 0.06);
+  white-space: pre-wrap;
   word-break: break-word;
 }
-.msg.user .bubble {
-  background: #d9efff;
-  color: #1f2937;
+
+/* 助手消息：无气泡，靠左侧黄铜竖线排版 */
+.msg-bot {
+  max-width: 100%;
+  padding-left: rpx(28);
+  border-left: rpx(4) solid var(--brass-2);
 }
-.msg-text {
+.msg-bot .who {
+  font-family: var(--font-num);
+  font-size: rpx(21);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--brass);
+  margin-bottom: rpx(14);
+}
+.msg-bot .say {
+  font-size: rpx(31);
+  color: var(--ink);
   white-space: pre-wrap;
+  word-break: break-word;
 }
 
-/* 流式输出：光标 + 状态提示 */
-.stream-caret {
+/* 流式光标 */
+.caret {
   display: inline-block;
   width: rpx(3);
-  height: rpx(26);
+  height: rpx(28);
   margin-left: rpx(4);
   vertical-align: text-bottom;
-  background: #c9a06a;
-  animation: caret-blink 1s steps(1) infinite;
+  background: var(--brass);
+  animation: adv-caret 1s steps(1) infinite;
 }
-@keyframes caret-blink {
+@keyframes adv-caret {
   0%, 49% { opacity: 1; }
   50%, 100% { opacity: 0; }
 }
-.stream-hint {
-  margin-top: rpx(8);
-  font-size: rpx(22);
-  color: #a39a93;
-  &.small { margin-top: rpx(6); font-size: rpx(20); }
-}
 
-/* 效果图 */
-.ai-effect {
-  margin-top: rpx(14);
-  border-radius: rpx(16);
-  overflow: hidden;
-  background: #f4f1ed;
-}
-.ai-effect-img {
-  width: 100%;
-  height: rpx(280);
-  display: block;
-  :deep(img) { width: 100%; height: 100%; object-fit: cover; }
-}
-
-/* DIY 方案卡 */
-.ai-plans { margin-top: rpx(16); }
-.ai-plan-card {
+/* 思考中 */
+.thinking-line,
+.tool-line {
   display: flex;
-  gap: rpx(14);
-  padding: rpx(14);
-  margin-top: rpx(10);
-  border: 1rpx solid #ebe6df;
-  border-radius: rpx(16);
-  background: #fff;
+  align-items: center;
+  gap: rpx(20);
+  color: var(--ink-2);
+  font-size: rpx(28);
 }
-.ai-plan-image {
-  width: rpx(120);
-  height: rpx(120);
-  flex: 0 0 rpx(120);
-  border-radius: rpx(12);
-  background: #f4f1ed;
+.tool-line { margin-top: rpx(14); font-size: rpx(22); color: var(--ink-3); }
+.think-dots { display: inline-flex; gap: rpx(8); flex: none; }
+.think-dots i {
+  width: rpx(10);
+  height: rpx(10);
+  border-radius: 50%;
+  background: var(--brass);
+  animation: adv-dot 1.25s ease-in-out infinite;
+}
+.think-dots i:nth-child(2) { animation-delay: 0.18s; }
+.think-dots i:nth-child(3) { animation-delay: 0.36s; }
+@keyframes adv-dot {
+  0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(rpx(-6)); }
+}
+
+/* ── 效果图 ── */
+.frame {
+  margin: rpx(30) auto 0;
+  max-width: rpx(560);
+  border: 1rpx solid var(--line-2);
+  border-radius: rpx(28);
   overflow: hidden;
-  :deep(img) { width: 100%; height: 100%; object-fit: cover; }
+  background: var(--paper-2);
+  box-shadow: 0 rpx(4) rpx(8) rgba(30, 28, 25, 0.05), 0 rpx(24) rpx(64) rgba(30, 28, 25, 0.07);
 }
-.ai-plan-body {
-  min-width: 0;
-  flex: 1;
+.frame-img {
+  width: 100%;
+  display: block;
+  background: var(--paper-3);
+  :deep(img) { width: 100%; height: auto; display: block; }
+}
+.frame-cap {
+  padding: rpx(22) rpx(36);
+  border-top: 1rpx solid var(--line);
+  font-size: rpx(22);
+  color: var(--ink-3);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: rpx(20);
+  letter-spacing: 0.04em;
+}
+.frame-cap b { font-family: var(--font-num); color: var(--ink-2); font-weight: 500; }
+
+/* ── 商品/方案卡（网格）── */
+.prods {
+  /* 助手消息列比容器窄（左侧有黄铜竖线缩进），可用宽约 0.86rem：
+     两列需满足 2×min + gap ≤ 0.86rem，取 min=290rpx(0.3867rem) 有两列且留约 20px 余量 */
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(rpx(290), 1fr));
+  gap: rpx(24);
+  margin-top: rpx(30);
+}
+.prod {
+  background: var(--paper-2);
+  border: 1rpx solid var(--line-2);
+  border-radius: rpx(24);
+  overflow: hidden;
   display: flex;
   flex-direction: column;
+  box-shadow: 0 rpx(2) rpx(8) rgba(30, 28, 25, 0.04);
+  cursor: pointer;
+  transition: 0.24s;
 }
-.ai-plan-name {
-  color: #332c28;
-  font-size: rpx(25);
-  font-weight: 700;
+.prod:active { border-color: var(--brass-2); background: #fffdfa; }
+.prod-img {
+  aspect-ratio: 4 / 3;
+  background: var(--paper-3);
+  overflow: hidden;
 }
-.ai-plan-desc {
-  margin-top: rpx(6);
-  color: #8d8580;
+.prod-img-inner {
+  width: 100%;
+  height: 100%;
+  display: block;
+  :deep(img) { width: 100%; height: 100%; object-fit: cover; display: block; }
+}
+/* ⚠️ 本页模板里的商品卡（mock 兜底那条路径）不走 AdvisorCards 组件，
+   所以图片兜底的粉紫渐变要在本文件里改回纸色，改了组件里的没用。 */
+.prod-img-inner,
+.frame-img {
+  background: var(--paper-3);
+}
+.prod-img-inner :deep(.f-image),
+.prod-img-inner :deep(.f-image-fallback),
+.frame-img :deep(.f-image),
+.frame-img :deep(.f-image-fallback) {
+  background: var(--paper-3);
+}
+.prod-body {
+  padding: rpx(22) rpx(26) rpx(26);
+  display: flex;
+  flex-direction: column;
+  gap: rpx(10);
+  flex: 1;
+  min-width: 0;
+}
+.prod-name {
+  font-family: var(--font-display);
+  font-size: rpx(30);
+  line-height: 1.4;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.prod-sub {
   font-size: rpx(22);
-  line-height: 1.45;
+  color: var(--ink-3);
+  line-height: 1.5;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.ai-plan-foot {
+.prod-foot {
   margin-top: auto;
-  padding-top: rpx(10);
   display: flex;
   align-items: center;
   justify-content: space-between;
-}
-.ai-plan-price {
-  color: #e8615d;
-  font-size: rpx(27);
-  font-weight: 800;
-}
-.ai-plan-buy {
-  padding: rpx(10) rpx(18);
-  border-radius: 999rpx;
-  background: #251f1c;
-  color: #fff;
-  font-size: rpx(22);
-  font-weight: 700;
-  cursor: pointer;
-}
-
-/* 推荐商品（mock） */
-.ai-products { margin-top: rpx(16); }
-.ai-product-card {
-  display: flex;
-  align-items: center;
   gap: rpx(14);
-  padding: rpx(14);
-  margin-top: rpx(10);
-  border: 1rpx solid #ebe6df;
-  border-radius: rpx(16);
-  background: #fff;
-  cursor: pointer;
+  padding-top: rpx(12);
+  flex-wrap: wrap;
 }
-.ai-product-image {
-  width: rpx(104);
-  height: rpx(104);
-  flex: 0 0 rpx(104);
-  border-radius: rpx(12);
-  background: #f4f1ed;
-  overflow: hidden;
-  :deep(img) { width: 100%; height: 100%; object-fit: cover; }
-}
-.ai-product-info { min-width: 0; flex: 1; }
-.ai-product-name {
-  display: block;
-  overflow: hidden;
-  color: #332c28;
-  font-size: rpx(25);
-  font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ai-product-price {
-  display: block;
-  margin-top: rpx(8);
-  color: #e8615d;
-  font-size: rpx(25);
-  font-weight: 800;
-}
-.ai-product-buy {
-  flex: 0 0 auto;
-  padding: rpx(10) rpx(14);
-  border-radius: 999rpx;
-  background: #251f1c;
-  color: #fff;
-  font-size: rpx(22);
-  font-weight: 700;
+.prod-price {
+  font-family: var(--font-num);
+  font-size: rpx(38);
+  color: var(--moss);
+  flex: none;
 }
 
-/* 选项 chips */
+/* ── 按钮（demo 的 .act）── */
+.act {
+  font-family: inherit;
+  font-size: rpx(23);
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  padding: rpx(12) rpx(26);
+  border-radius: rpx(999);
+  transition: 0.22s;
+  border: 1rpx solid var(--moss);
+  background: var(--moss);
+  color: #f4f2ea;
+  white-space: nowrap;
+  flex: none;
+}
+.act:active { background: var(--moss-2); border-color: var(--moss-2); }
+.act.ghost { background: none; color: var(--moss); border-color: var(--line-2); }
+.act.ghost:active { background: #edf1ec; border-color: var(--moss-3); }
+
+/* ── 选项 chips ── */
 .ai-options {
-  margin-top: rpx(14);
+  margin-top: rpx(24);
   display: flex;
   flex-wrap: wrap;
-  gap: rpx(12);
+  gap: rpx(16);
 }
-.ai-option-chip {
-  padding: rpx(10) rpx(20);
-  border-radius: 999rpx;
-  background: #fff;
-  border: 1rpx solid #e3dcd3;
-  color: #5c524d;
+.opt-chip {
+  font-family: inherit;
   font-size: rpx(23);
+  letter-spacing: 0.03em;
+  color: var(--ink-2);
+  background: var(--paper-2);
+  border: 1rpx solid var(--line-2);
+  border-radius: rpx(999);
+  padding: rpx(12) rpx(26);
   cursor: pointer;
+  transition: 0.2s;
 }
+.opt-chip:active { color: var(--moss); border-color: var(--moss-3); background: #edf1ec; }
 
-
+/* ── 输入区（在流内，不再 fixed）── */
+.composer {
+  flex: none;
+  padding: rpx(22) rpx(40) calc(#{rpx(24)} + env(safe-area-inset-bottom));
+  border-top: 1rpx solid var(--line-2);
+  background: transparent;
+}
 .input-row {
-  position: fixed;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 1rem;
-  z-index: 999;
+  display: flex;
+  gap: rpx(18);
+  align-items: flex-end;
+}
+.input-wrap {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: flex-end;
-  gap: rpx(8);
-  padding: rpx(10) rpx(22) calc(#{rpx(14)} + env(safe-area-inset-bottom));
-  background: #fff;
-  box-sizing: border-box;
-  border-top: 1rpx solid #f1eee9;
+  background: var(--paper-2);
+  border: 1rpx solid var(--line-2);
+  border-radius: rpx(32);
+  padding: rpx(16) rpx(28);
+  transition: 0.22s;
+  box-shadow: 0 rpx(2) rpx(8) rgba(30, 28, 25, 0.04);
+}
+.input-wrap:focus-within {
+  border-color: var(--moss-3);
+  box-shadow: 0 0 0 rpx(6) rgba(107, 133, 116, 0.12);
 }
 .chat-input {
   flex: 1;
-  min-height: rpx(72);
-  max-height: rpx(150);
-  padding: rpx(18) rpx(22);
-  border: none;
-  border-radius: rpx(20);
-  background: #f8f6f3;
-  color: #332c28;
-  font-size: rpx(26);
-  line-height: 1.4;
-  resize: none;
-  outline: none;
+  width: 100%;
   font-family: inherit;
+  font-size: rpx(30);
+  line-height: 1.6;
+  color: var(--ink);
+  border: none;
+  background: none;
+  outline: none;
+  resize: none;
+  max-height: rpx(264);
+  min-height: rpx(52);
+  padding: 0;
 }
-.send-btn {
-  width: rpx(112);
-  height: rpx(72);
-  border-radius: 999rpx;
+.chat-input::placeholder { color: var(--ink-3); }
+.send {
+  flex: none;
+  width: rpx(84);
+  height: rpx(84);
+  border-radius: rpx(26);
+  border: 1rpx solid var(--moss);
+  background: var(--moss);
+  color: #f4f2ea;
+  cursor: pointer;
+  transition: 0.22s;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #251f1c;
-  color: #fff;
-  font-size: rpx(26);
-  font-weight: 800;
-  cursor: pointer;
-  flex-shrink: 0;
 }
-.send-btn.stop {
-  background: #8a8276;
+.send:active:not(:disabled) { background: var(--moss-2); border-color: var(--moss-2); }
+.send:disabled { opacity: 0.32; cursor: not-allowed; }
+.send.stop { background: var(--ink-3); border-color: var(--ink-3); opacity: 1; }
+.send svg {
+  width: rpx(34);
+  height: rpx(34);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.send.stop svg { fill: currentColor; stroke: none; }
+.foot-note {
+  font-size: rpx(21);
+  color: var(--ink-3);
+  text-align: center;
+  margin: rpx(20) 0 0;
+  letter-spacing: 0.04em;
+  line-height: 1.6;
+}
+.foot-note b {
+  color: var(--brass);
+  font-weight: 400;
+  letter-spacing: 0.16em;
+  font-family: var(--font-display);
+}
+
+/* ── 窄屏 ──
+   视口 ≤480 时容器宽 = 视口宽，所以这里的媒体查询与容器查询等价；
+   桌面（视口 >480）容器恒为 480，走完整版式（实测宽度刚好放得下）。 */
+@media (max-width: 430px) {
+  /* 副标题是装饰性的，让位给标题；状态只留圆点，信息不丢 */
+  .brand-sub { display: none; }
+  .status-text { display: none; }
+  .status { padding: rpx(8) rpx(10); }
+  .masthead { padding-left: rpx(28); padding-right: rpx(28); }
+  .chips-row,
+  .stage,
+  .composer { padding-left: rpx(28); padding-right: rpx(28); }
+  .stage { padding-top: rpx(36); }
+  .log { gap: rpx(38); }
+  .msg-user { max-width: 88%; }
 }
 </style>

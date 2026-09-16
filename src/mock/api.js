@@ -987,11 +987,13 @@ function buildPlanFromText(text) {
   const source = matchPreset(text) || GENERIC_PLAN
   const budget = matchBudget(text)
   return {
-    title: source.title,
+    // ⚠️ SCENE_PRESETS 里只有 label、没有 title（GENERIC_PLAN 才有 title），
+    //    原来直接读 source.title → 预设场景一律渲染成「undefined」。
+    title: source.title || source.label || GENERIC_PLAN.title,
     scene: source.scene,
     emotion: source.emotion,
     style: source.style,
-    budgetText: budget ? `约 ¥${budget}` : source.budgetText,
+    budgetText: budget ? `约 ¥${budget}` : (source.budgetText || GENERIC_PLAN.budgetText),
     materials: source.materials,
 
     palette: source.palette,
