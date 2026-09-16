@@ -161,9 +161,12 @@ export async function consumeCode(phone, inputCode) {
 //   SMS_ALIYUN_ACCESS_KEY_ID / SMS_ALIYUN_ACCESS_KEY_SECRET  （建议用 RAM 子账号，只授 dysms 权限）
 //   SMS_ALIYUN_SIGN_NAME      签名名称（控制台「签名管理」里已审核通过的那个）
 //   SMS_ALIYUN_TEMPLATE_CODE  模板 CODE，形如 SMS_2958xxxx（控制台「模板管理」）
-//   SMS_ALIYUN_TEMPLATE_PARAM 可选：变量名映射模板，默认 {"code":"{code}","min":"{ttl}"}
-//                             {code}=验证码 {ttl}=有效分钟数；模板只有一个变量就删掉多余的键。
-//                             ⚠️ 键名必须与阿里云模板正文里的 ${xxx} 完全一致，否则会报变量缺失。
+//   SMS_ALIYUN_TEMPLATE_PARAM 变量名映射模板，默认 {"code":"{code}"}（单变量验证码模板）
+//                             {code}=验证码、{ttl}=有效分钟数；
+//                             ⚠️ **变量个数与键名必须与模板正文里的 ${xxx} 完全一致**，
+//                             多了少了都会被阿里云判参数错误（模板把「N分钟内有效」写死时
+//                             就只有一个 ${code}，不要带 min 键）。
+//                             例：正文「您的验证码是${code}，${min}分钟内有效」→ {"code":"{code}","min":"{ttl}"}
 //   SMS_ALIYUN_REGION         可选，默认 cn-hangzhou
 
 /** 阿里云 POP 签名要求的 percentEncode：保留 A-Za-z0-9-_.~，其余全编码（空格→%20 而非 +） */
@@ -185,7 +188,7 @@ async function sendAliyunSms(phone, code) {
     SignatureNonce: crypto.randomUUID(),
     SignatureVersion: '1.0',
     TemplateCode: process.env.SMS_ALIYUN_TEMPLATE_CODE,
-    TemplateParam: String(process.env.SMS_ALIYUN_TEMPLATE_PARAM || '{"code":"{code}","min":"{ttl}"}')
+    TemplateParam: String(process.env.SMS_ALIYUN_TEMPLATE_PARAM || '{"code":"{code}"}')
       .replace(/\{code\}/g, String(code))
       .replace(/\{ttl\}/g, String(TTL_MIN)),
     Timestamp: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
@@ -205,11 +208,35 @@ async function sendAliyunSms(phone, code) {
   })
   const j = await res.json().catch(() => null)
   if (!res.ok || !j || j.Code !== 'OK') {
-    // 常见 Code：isv.SMS_SIGNATURE_ILLEGAL(签名不合法) / isv.SMS_TEMPLATE_ILLEGAL(模板不合法)
-    //            isv.BUSINESS_LIMIT_CONTROL(触发流控) / isv.AMOUNT_NOT_ENOUGH(余额不足)
-    const msg = (j && (j.Message || j.Code)) || ('aliyun sms http ' + res.status)
-    throw { status: 502, message: '短信发送失败：' + msg }
+    // ⚠️ 只打 Message 是不够的：阿里云大量问题的定位信息在 Code 里（SignatureDoesNotMatch / Forbidden.RAM /
+    //    isv.TEMPLATE_PARAM_ERROR…），所以 code + message + requestId 一起打，并翻译成人话。
+    const code = (j && j.Code) || ('HTTP_' + res.status)
+    const msg = (j && j.Message) || '(无 message)'
+    const rid = (j && j.RequestId) || '-'
+    console.warn('[sms/aliyun] 发送失败 code=%s requestId=%s message=%s', code, rid, msg)
+    const hint = aliyunHint(code + ' ' + msg)
+    throw { status: 502, message: `短信发送失败：${code} | ${msg}${hint ? ' → ' + hint : ''}` }
   }
+}
+
+/** 阿里云错误 → 人话（上线后一眼定位，不用查文档） */
+const ALIYUN_HINTS = [
+  [/not authorized|Forbidden|NoPermission|ImplicitDeny/i, 'RAM 权限不足：RAM 控制台需给该用户授权 AliyunDysmsFullAccess'],
+  [/SignatureDoesNotMatch/i, '签名不匹配：AccessKey Secret 填错，或服务器时间偏差过大'],
+  [/InvalidAccessKeyId/i, 'AccessKey ID 不存在或已被禁用'],
+  [/SMS_SIGNATURE_ILLEGAL/i, '签名不合法：未审核通过或与账号不匹配（查 SMS_ALIYUN_SIGN_NAME）'],
+  [/SMS_TEMPLATE_ILLEGAL/i, '模板不合法：未审核通过或 CODE 不对（查 SMS_ALIYUN_TEMPLATE_CODE）'],
+  [/TEMPLATE_PARAM|PARAM_LENGTH|variable/i, '模板变量不匹配：SMS_ALIYUN_TEMPLATE_PARAM 的键名与个数须与模板正文 ${xxx} 一致'],
+  [/PORT_NOT_REGISTERED/i, '签名实名报备未完成（运营商侧）：继续测试发送等报备落定，非代码问题'],
+  [/AMOUNT_NOT_ENOUGH/i, '阿里云账户余额不足'],
+  [/BUSINESS_LIMIT_CONTROL|DAY_LIMIT/i, '触发阿里云流控或日发送量上限'],
+  [/MOBILE_NUMBER_ILLEGAL/i, '手机号格式不合法'],
+  [/MOBILE_NUMBER_NOT_REGISTERED/i, '该号码为空号/停机'],
+  [/UNSUPPORTED_OPERATION|SERVICE_NOT_ENABLED/i, '短信服务未开通或该账户不可用短信']
+]
+function aliyunHint(text) {
+  for (const [re, hint] of ALIYUN_HINTS) if (re.test(text)) return hint
+  return ''
 }
 
 // ---------- 腾讯云 SMS（TC3-HMAC-SHA256 直调，零依赖） ----------
