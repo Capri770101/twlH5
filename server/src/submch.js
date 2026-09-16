@@ -4,7 +4,6 @@
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { WXPAY } from './wxpay.js'
 import { query } from './db.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -31,14 +30,15 @@ export async function resolveSubMch(shopId) {
   const cfg = loadConfig()
   if (cfg[shopId]) {
     const m = cfg[shopId]
-    return { subMchid: m.subMchid, subAppid: m.subAppid || WXPAY.spAppid, settleRatio: m.settleRatio || 0 }
+    // subAppid 刻意不回落成服务商 appid：把 sp_appid 又当 sub_appid 传会被微信判非法请求
+    return { subMchid: m.subMchid, subAppid: m.subAppid || '', settleRatio: m.settleRatio || 0 }
   }
   try {
     const rows = await query('SELECT sub_mchid, sub_appid, settle_ratio FROM `shops` WHERE id = ?', [shopId])
     if (rows[0] && rows[0].sub_mchid) {
       return {
         subMchid: rows[0].sub_mchid,
-        subAppid: rows[0].sub_appid || WXPAY.spAppid,
+        subAppid: rows[0].sub_appid || '',
         settleRatio: Number(rows[0].settle_ratio) || 0
       }
     }

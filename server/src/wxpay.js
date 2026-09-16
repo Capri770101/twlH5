@@ -158,8 +158,11 @@ export async function wxpayRequest(method, apiPath, bodyObj) {
   let json = null
   try { json = respBody ? JSON.parse(respBody) : null } catch (e) { /* 可能为空 */ }
   if (!resp.ok) {
-    const code = json && (json.code || json.message)
-    throw new Error(`[wxpay] ${method} ${apiPath} -> ${resp.status} ${code || respBody}`)
+    // 把 code / message / detail 都带上：微信很多错误只在 detail 里说明是哪个字段不合法
+    const info = json
+      ? [json.code, json.message, json.detail ? JSON.stringify(json.detail) : ''].filter(Boolean).join(' | ')
+      : respBody
+    throw new Error(`[wxpay] ${method} ${apiPath} -> ${resp.status} ${info}`)
   }
   return json
 }

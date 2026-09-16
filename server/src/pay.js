@@ -21,6 +21,25 @@ const router = express.Router()
 // 兼容旧引用：resolveSubMch 已移到 submch.js（pay.js 与 profitsharing.js 共用，避免循环 import）
 export { resolveSubMch }
 
+/** 取用户终端 IPv4：前端传入 → X-Forwarded-For（nginx 已设）→ 直连地址。取不到返回 '' */
+function resolveClientIp(req, fromBody) {
+  const cands = [
+    fromBody,
+    String((req.headers && req.headers['x-forwarded-for']) || '').split(',')[0],
+    (req.socket && req.socket.remoteAddress) || ''
+  ]
+  for (let v of cands) {
+    v = String(v || '').trim().replace(/^::ffff:/, '')
+    if (/^(\d{1,3}\.){3}\d{1,3}$/.test(v) && !v.startsWith('10.') && !v.startsWith('127.')) return v
+  }
+  // 兜底：内网地址也接受（本地联调场景），总比直接失败好
+  for (let v of cands) {
+    v = String(v || '').trim().replace(/^::ffff:/, '')
+    if (/^(\d{1,3}\.){3}\d{1,3}$/.test(v)) return v
+  }
+  return ''
+}
+
 // ---------- 下单（JSAPI / H5） ----------
 // body: { shopId, outTradeNo, amountFen, description, openid?, tradeType?('JSAPI'|'H5'), clientIp? }
 router.post('/order', async (req, res) => {
@@ -42,13 +61,16 @@ router.post('/order', async (req, res) => {
     const body = {
       sp_appid: WXPAY.spAppid,
       sp_mchid: WXPAY.spMchid,
-      sub_appid: sub.subAppid,
       sub_mchid: sub.subMchid,
       description: String(description || '跳舞兰AI花店订单').slice(0, 127),
       out_trade_no: String(outTradeNo),
       notify_url: WXPAY.notifyUrl,
       amount: { total: dbAmount, currency: 'CNY' }
     }
+    // sub_appid 只在「确实配置了子商户自己的 appid」时才带。
+    // 曾把 sub_appid 回落成服务商自己的 appid → 微信判为非法请求（400 INVALID_REQUEST），
+    // 导致 H5 的下单接口一直失败。留空则由微信按 sp_appid 下的 openid 处理。
+    if (sub.subAppid && sub.subAppid !== WXPAY.spAppid) body.sub_appid = sub.subAppid
     // 仅当「该店佣金 > 0」**且**「分账队列已启用」才标记需要分账。
     // 只标记却不真正分账 = 花店资金被白冻 30 天，所以两个条件必须同时满足。
     // 微信分账只能按金额（不能按比例），比例需自行折算成金额后传。
@@ -65,7 +87,14 @@ router.post('/order', async (req, res) => {
       if (!openid) return res.status(400).json({ error: 'JSAPI 需要 openid' })
       body.payer = { sp_openid: openid }
     } else {
+      // H5(MWEB) 支付：scene_info.payer_client_ip 是**微信必填**（用于风控），缺了直接 400
+      // （原实现漏了这个字段 → 外部浏览器支付一直失败，且错误信息只显示 PARAM_ERROR 难定位）
+      const ip = resolveClientIp(req, clientIp)
+      if (!ip) {
+        return res.status(400).json({ error: 'H5 支付需要有效的用户终端 IPv4（scene_info.payer_client_ip）' })
+      }
       body.scene_info = {
+        payer_client_ip: ip,
         h5_info: {
           type: 'Wap',
           app_name: '跳舞兰AI花店',
@@ -96,7 +125,10 @@ router.get('/query/:outTradeNo', async (req, res) => {
   try {
     const subMchid = req.query.subMchid || (req.query.shopId ? (await resolveSubMch(req.query.shopId)).subMchid : null)
     if (!subMchid) return res.status(400).json({ error: 'missing subMchid or shopId' })
-    const r = await wxpayRequest('GET', `/v3/pay/partner/transactions/out-trade-no/${encodeURIComponent(req.params.outTradeNo)}?sub_mchid=${encodeURIComponent(subMchid)}`)
+    // 服务商模式：sp_mchid 与 sub_mchid **都必须**带，否则 400 PARAM_ERROR
+    const r = await wxpayRequest('GET',
+      `/v3/pay/partner/transactions/out-trade-no/${encodeURIComponent(req.params.outTradeNo)}` +
+      `?sp_mchid=${encodeURIComponent(WXPAY.spMchid)}&sub_mchid=${encodeURIComponent(subMchid)}`)
     return res.json(r)
   } catch (e) {
     return res.status(500).json({ error: String(e.message || e) })
@@ -109,7 +141,9 @@ router.post('/close', async (req, res) => {
     const { outTradeNo, subMchid, shopId } = req.body
     const sub = subMchid || (shopId ? (await resolveSubMch(shopId)).subMchid : null)
     if (!sub || !outTradeNo) return res.status(400).json({ error: 'missing outTradeNo/subMchid' })
-    await wxpayRequest('POST', `/v3/pay/partner/transactions/out-trade-no/${encodeURIComponent(outTradeNo)}/close`, { sub_mchid: sub })
+    await wxpayRequest('POST',
+      `/v3/pay/partner/transactions/out-trade-no/${encodeURIComponent(outTradeNo)}/close`,
+      { sp_mchid: WXPAY.spMchid, sub_mchid: sub }) // 同上：两个商户号都要带
     return res.json({ ok: true })
   } catch (e) {
     return res.status(500).json({ error: String(e.message || e) })
