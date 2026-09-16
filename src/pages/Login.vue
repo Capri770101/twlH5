@@ -430,12 +430,15 @@ async function onCopyLink() {
 }
 
 // ===== 手机端：扫 PC 二维码打开（?pc=票据）→ 授权登录后回传 =====
-let phonePcTicket = ''
-
-async function approvePhonePc() {
-  const t = phonePcTicket
-  if (!t) return
-  phonePcTicket = ''
+// ⚠️ 票据一律走**入参**，不要存模块级变量：
+//    微信 OAuth 回跳那条路径里票据来自 URL 参数，而模块变量在那时还是空的
+//    （曾因此静默 return、一个请求都不发，PC 端永远停在"待授权"）。
+async function approvePhonePc(ticket) {
+  const t = ticket
+  if (!t) {
+    toast('未取到电脑端票据，请重新扫码')
+    return
+  }
   try {
     await pcApprove(t)
     toast('已授权电脑登录，可关闭本页')
@@ -456,7 +459,7 @@ async function wechatLoginByCode(code, state, pcTicket) {
     if (pcTicket) {
       // 手机扫 PC 码场景：登录后把票据授权给电脑，停留本页提示可关闭
       login(userInfo, token)
-      await approvePhonePc()
+      await approvePhonePc(pcTicket)
     } else {
       finishLogin(userInfo, token)
     }
@@ -475,9 +478,8 @@ onMounted(() => {
   // 扫 PC 二维码打开：已登录直接授权；未登录走微信授权（snsapi_userinfo 有同意框，不静默）
   const pc = (q.pc && /^[a-f0-9]{16,64}$/i.test(String(q.pc))) ? String(q.pc) : ''
   if (pc) {
-    phonePcTicket = pc
     if (store.isLogged && store.token && !String(store.token).startsWith('mock_')) {
-      approvePhonePc()
+      approvePhonePc(pc)
       return
     }
     if (wechatEnv && WX_APPID) {

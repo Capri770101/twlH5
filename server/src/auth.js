@@ -498,10 +498,17 @@ router.post('/pc-approve', async (req, res) => {
     const auth = String(req.headers.authorization || '')
     const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : ''
     const payload = verifyToken(token)
-    if (!payload || !payload.uid) return res.status(401).json({ error: '请先在手机上完成微信登录' })
+    if (!payload || !payload.uid) {
+      // 打日志：这条 401 曾让「手机已登录但 PC 拿不到授权」变得无从排查
+      console.warn('[auth/pc-approve] 401：token %s（ticket=%s）', token ? '校验不通过/已过期' : '缺失', ticket.slice(0, 8) + '…')
+      return res.status(401).json({ error: '请先在手机上完成微信登录' })
+    }
     const uid = Number(payload.uid)
     const rows = await hq('SELECT * FROM users WHERE id = ?', [uid])
-    if (!rows || !rows.length) return res.status(401).json({ error: '账号不存在' })
+    if (!rows || !rows.length) {
+      console.warn('[auth/pc-approve] 401：账号不存在 uid=%s', uid)
+      return res.status(401).json({ error: '账号不存在' })
+    }
     sweepPcTickets()
     pcTickets.set(ticket, { uid, expires: Date.now() + PC_TICKET_TTL })
     console.log('[auth/pc-approve] 票据授权: uid=%s nickname=%s', uid, rows[0].nickname || '-')
@@ -517,6 +524,8 @@ router.get('/pc-status', async (req, res) => {
   try {
     const ticket = String((req.query && req.query.ticket) || '').trim()
     if (!PC_TICKET_RE.test(ticket)) return res.status(400).json({ error: 'invalid ticket' })
+    // 轮询接口：禁止任何缓存/304（否则浏览器可能一直拿到旧的 pending，看不到状态翻转）
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate')
     sweepPcTickets()
     const t = pcTickets.get(ticket)
     if (!t) return res.json({ status: 'pending' })
