@@ -112,17 +112,23 @@ async function findSelf(conn, bindUserId) {
 }
 
 /**
- * 安全校验：客户端若传 bindUserId（要把当前登录行并入新账号），必须同时带
- * 对应 JWT 且 payload.uid 一致，防止拿他人 user id 把对方订单合并到自己名下。
+ * 校验并「净化」客户端传来的 bindUserId（把当前登录行并入新账号时用）。
+ * 必须同时带对应 JWT 且 payload.uid 一致，防止拿他人 user id 把对方订单并到自己名下。
+ *
+ * ⚠️ 校验不过时**返回空串（忽略合并）而不是抛 403**：
+ *   - 合并只是优化项，不做合并不会越权、也不会混淆数据；
+ *   - 而硬失败会把「客户端残留脏登录态（旧 token / 旧 userInfo）」升级成「完全无法登录」——
+ *     实际踩过：手机端 localStorage 留着旧部署的 userInfo.id，token 已失效 →
+ *     微信登录被 403 卡死（日志 [auth/wechat] 失败 status=403）。
  */
-async function assertCanBind(req, bindUserId) {
-  if (!bindUserId) return
+function verifiedBindUserId(req, bindUserId) {
+  if (!bindUserId) return ''
   const auth = String(req.headers.authorization || '')
   const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : ''
   const payload = verifyToken(token)
-  if (!payload || !payload.uid || Number(payload.uid) !== Number(bindUserId)) {
-    throw { status: 403, message: '无权绑定该账号（请先登录）' }
-  }
+  if (payload && payload.uid && Number(payload.uid) === Number(bindUserId)) return String(bindUserId)
+  console.warn('[auth] bindUserId=%s 无法验证（token 缺失/过期/不匹配）→ 已忽略，仅跳过账号合并', bindUserId)
+  return ''
 }
 
 // ==================== 匿名访客（过渡身份，兼作后续升级底座） ====================
@@ -133,7 +139,7 @@ router.post('/guest', async (req, res) => {
     if (!guestId || guestId.length < 8 || guestId.length > 64) {
       return res.status(400).json({ error: 'bad guestId' })
     }
-    const bindUserId = (req.body && req.body.bindUserId) || ''
+    let bindUserId = (req.body && req.body.bindUserId) || ''
     const nickname = String((req.body && req.body.nickname) || '').slice(0, 32)
     const user = await withTx(async conn => {
       const self = await findSelf(conn, bindUserId)
@@ -199,12 +205,12 @@ router.post('/sms/login', async (req, res) => {
   const phone = String((req.body && req.body.phone) || '').trim()
   const code = String((req.body && req.body.code) || '').trim()
   const guestId = String((req.body && req.body.guestId) || '').trim() || null
-  const bindUserId = (req.body && req.body.bindUserId) || ''
+  let bindUserId = (req.body && req.body.bindUserId) || ''
   const nickname = String((req.body && req.body.nickname) || '').slice(0, 32)
   if (!validPhone(phone)) return res.status(400).json({ error: '手机号格式不正确' })
   if (!/^\d{6}$/.test(code)) return res.status(400).json({ error: '验证码为 6 位数字' })
   try {
-    await assertCanBind(req, bindUserId) // bindUserId 需对应 JWT（防越权合并）
+    bindUserId = verifiedBindUserId(req, bindUserId) // 校验不过则忽略合并，绝不阻断登录
     await consumeCode(phone, code) // 校验并消费
     const user = await withTx(async conn => {
       const self = await findSelf(conn, bindUserId)
@@ -248,7 +254,7 @@ router.post('/register', async (req, res) => {
   const code = String((req.body && req.body.code) || '').trim()
   const nickname = String((req.body && req.body.nickname) || '').slice(0, 32)
   const guestId = String((req.body && req.body.guestId) || '').trim() || null
-  const bindUserId = (req.body && req.body.bindUserId) || ''
+  let bindUserId = (req.body && req.body.bindUserId) || ''
 
   if (!validUsername(username)) return res.status(400).json({ error: '账号需字母开头，4-20 位字母/数字/下划线' })
   if (!validPassword(password)) return res.status(400).json({ error: '密码长度需 6-32 位' })
@@ -256,7 +262,7 @@ router.post('/register', async (req, res) => {
   if (!/^\d{6}$/.test(code)) return res.status(400).json({ error: '验证码为 6 位数字' })
 
   try {
-    await assertCanBind(req, bindUserId) // bindUserId 需对应 JWT（防越权合并）
+    bindUserId = verifiedBindUserId(req, bindUserId) // 校验不过则忽略合并，绝不阻断登录
     await consumeCode(phone, code)       // 手机号短信校验并消费
     const user = await withTx(async conn => {
       const [[uExist]] = await conn.query('SELECT id FROM users WHERE username = ? FOR UPDATE', [username])
@@ -375,12 +381,12 @@ router.post('/wechat', async (req, res) => {
     return res.status(501).json({ error: '微信登录未配置（缺 WX_OAUTH_APPID/WX_OAUTH_SECRET）' })
   }
   const guestId = String((req.body && req.body.guestId) || '').trim() || null
-  const bindUserId = (req.body && req.body.bindUserId) || ''
+  let bindUserId = (req.body && req.body.bindUserId) || ''
   console.log('[auth/wechat] 请求: code=%s*(len=%d) guestId=%s bindUserId=%s ua=%s',
     code.slice(0, 6), code.length, guestId || '-', bindUserId || '-',
     String(req.headers['user-agent'] || '').slice(0, 60))
   try {
-    await assertCanBind(req, bindUserId) // bindUserId 需对应 JWT（防越权合并）
+    bindUserId = verifiedBindUserId(req, bindUserId) // 校验不过则忽略合并，绝不阻断登录
     // 1) code 换 openid/unionid（oa=服务号网页授权；mp=小程序 code2session）
     const mode = process.env.WX_OAUTH_MODE || 'oa'
     const api = mode === 'mp'
@@ -430,12 +436,12 @@ router.post('/wechat-pc', async (req, res) => {
     return res.status(501).json({ error: 'PC 扫码登录未配置（缺 WX_OPEN_APPID/WX_OPEN_SECRET，需微信开放平台网站应用审核通过）' })
   }
   const guestId = String((req.body && req.body.guestId) || '').trim() || null
-  const bindUserId = (req.body && req.body.bindUserId) || ''
+  let bindUserId = (req.body && req.body.bindUserId) || ''
   console.log('[auth/wechat-pc] 请求: code=%s*(len=%d) guestId=%s bindUserId=%s ua=%s',
     code.slice(0, 6), code.length, guestId || '-', bindUserId || '-',
     String(req.headers['user-agent'] || '').slice(0, 60))
   try {
-    await assertCanBind(req, bindUserId)
+    bindUserId = verifiedBindUserId(req, bindUserId) // 校验不过则忽略合并，绝不阻断登录
     // 1) code 换 access_token/openid/unionid（网站应用扫码登录，同一端点不同 appid）
     const api = `https://api.weixin.qq.com/sns/oauth2/access_token?appid=${encodeURIComponent(appid)}&secret=${encodeURIComponent(secret)}&code=${encodeURIComponent(code)}&grant_type=authorization_code`
     const j = await fetch(api).then(r => r.json())

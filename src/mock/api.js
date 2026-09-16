@@ -18,11 +18,19 @@ async function realApi(path, params, token) {
   const res = await fetch(url, { headers: { Accept: 'application/json', ...authHeaders(token) } })
   if (!res.ok) {
     const j = await res.json().catch(() => null)
-    throw new Error((j && j.error) || ('api ' + res.status))
+    throw httpError((j && j.error) || ('api ' + res.status), res.status)
   }
   const j = await res.json()
   if (j && j.error) throw new Error(j.error)
   return j
+}
+
+/** 带上 HTTP 状态码的错误（调用方据此区分「鉴权失败」与「业务失败/网络失败」） */
+function httpError(message, status) {
+  const e = new Error(message)
+  e.status = status
+  if (status === 401) clearStaleAuth() // 401 = 本地登录态已失效（过期/换密钥）→ 清掉，避免死循环
+  return e
 }
 
 // POST 到真实后端（支付等写操作）
@@ -36,7 +44,7 @@ async function realPost(path, body, token) {
   })
   if (!res.ok) {
     const j = await res.json().catch(() => null)
-    throw new Error((j && j.error) || ('api ' + res.status))
+    throw httpError((j && j.error) || ('api ' + res.status), res.status)
   }
   const j = await res.json()
   if (j && j.error) throw new Error(j.error)
@@ -220,8 +228,10 @@ function genGuestId() {
 export async function ensureGuestAuth() {
   const token = localToken()
   const ui = localUser()
-  // 有效非 mock token + 有 user.id → 直接复用（JWT 由后端校验；手机号/微信/guest 登录均适用）
-  if (token && !token.startsWith('mock_') && ui && ui.id) {
+  // 本地判定可用的 token + 有 user.id → 直接复用（手机号/微信/guest 登录均适用）。
+  // ⚠️ 必须用 isTokenUsable 而非只看「非 mock_」：否则残留的过期 token 会被当成有效身份
+  //    一直复用，导致后续需要鉴权的接口全部失败。
+  if (isTokenUsable(token) && ui && ui.id) {
     return { userInfo: ui, token }
   }
   let guestId = ''
@@ -599,17 +609,37 @@ function persistAuth(token, info) {
   } catch (e) { /* ignore */ }
 }
 
+/**
+ * 令牌是否「本地可判定为可用」：JWT 三段结构 + 未过期。
+ * 前端拿不到签名密钥，验真伪是后端 verifyToken 的事；这里只挡掉明显失效的——
+ * 换密钥/换部署后残留的旧 token、已过期 token。带上去只会污染请求。
+ */
+function isTokenUsable(t) {
+  if (!t || String(t).startsWith('mock_')) return false
+  if (String(t).split('.').length !== 3) return false
+  const exp = jwtExp(t)
+  return exp > 0 && exp > Date.now()
+}
+
 // 读取当前匿名/弱身份凭据（用于账号合并）
 function currentIdentity() {
   let guestId = ''
   try { guestId = localStorage.getItem('twd_guest_id') || '' } catch (e) { /* ignore */ }
   const ui = localUser()
   const t = localToken() || ''
-  // 仅当持有「真实 JWT」时才下发 bindUserId：后端 assertCanBind 会校验 JWT.uid 与之一致；
-  // 若带 mock_ token 或无 token 却传 bindUserId，会被判 403「无权绑定该账号」而卡死注册/登录。
-  const canBind = !!t && !t.startsWith('mock_')
+  // 仅当持有「本地判定可用」的 JWT 时才下发 bindUserId（后端仍会再验一次签名与 uid）：
+  // 旧版只看 token 非 mock_，于是残留的失效 token + 旧 userInfo 会被判 403 卡死登录。
+  const canBind = isTokenUsable(t)
   const bindUserId = (canBind && ui && ui.id && !ui.phone) ? String(ui.id) : ''
   return { guestId, bindUserId }
+}
+
+/** 清理本地登录态（token 已失效时调用，避免「看着已登录、实际全报错」） */
+export function clearStaleAuth() {
+  try {
+    localStorage.removeItem('twd_token')
+    localStorage.removeItem('twd_userInfo')
+  } catch (e) { /* ignore */ }
 }
 
 // 是否「网络层失败」（此时允许回退 mock）；业务错误(验证码错/429/400)必须如实上抛

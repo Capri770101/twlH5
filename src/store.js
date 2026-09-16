@@ -26,6 +26,24 @@ const SEL_KEY = 'twd_selected_address'
 const TOKEN_KEY = 'twd_token'
 const USER_KEY = 'twd_userInfo'
 
+/**
+ * 仅对「看起来是 JWT」的 token 判过期（旧式原文 token 无法判，按未过期处理）。
+ * 目的：换密钥/换部署后残留的过期 token 会让 App 显示成"已登录"，
+ * 但所有需要鉴权的接口都会失败，且会把脏身份带给登录接口 → 必须先清掉。
+ */
+function isExpiredJwt(t) {
+  const parts = String(t || '').split('.')
+  if (parts.length !== 3) return false
+  try {
+    const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/')
+    const payload = JSON.parse(decodeURIComponent(escape(atob(b64))))
+    if (!payload || !payload.exp) return false
+    return payload.exp * 1000 < Date.now()
+  } catch (e) {
+    return false
+  }
+}
+
 // 恢复本地数据
 try {
   const cart = JSON.parse(localStorage.getItem(CART_KEY) || '[]')
@@ -37,10 +55,15 @@ try {
   // 登录态恢复（与小程序 app.js onLaunch 读 token/userInfo 一致）
   const token = localStorage.getItem(TOKEN_KEY)
   const userInfo = JSON.parse(localStorage.getItem(USER_KEY) || 'null')
-  if (token && userInfo) {
+  if (token && userInfo && !isExpiredJwt(token)) {
     state.token = token
     state.userInfo = userInfo
     state.isLogged = true
+  } else if (token && userInfo) {
+    // token 已过期 → 清掉，避免「看着已登录、实际所有接口都 401」的假象
+    localStorage.removeItem(TOKEN_KEY)
+    localStorage.removeItem(USER_KEY)
+    console.warn('[store] 本地 token 已过期，已清理登录态')
   }
 } catch (e) {
   /* 忽略损坏的本地数据 */
