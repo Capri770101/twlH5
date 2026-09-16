@@ -10,6 +10,7 @@ import {
   storeHome, storeCategories, storeAllFlowers, storeFlowerById, storeAllShops, storeShopFull, storeHealth
 } from './store.js'
 import payRouter, { handleNotify } from './pay.js'
+import { startProfitSharingScanner } from './profitsharing.js'
 import ordersRouter from './orders.js'
 import authRouter from './auth.js'
 
@@ -476,4 +477,6 @@ app.listen(PORT, () => {
   console.log(`[server] 跳舞兰 H5 后端已启动: http://localhost:${PORT}`)
   console.log(`[server]   ${biz}`)
   console.log(`[server]   ${src}（READ_SOURCE=${store}）`)
+  // 启动分账扫描（未启用时会打印一行说明；启用后首扫在 10s 后）
+  startProfitSharingScanner()
 })

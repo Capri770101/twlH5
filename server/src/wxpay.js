@@ -68,7 +68,9 @@ export async function getPlatformCerts() {
   const sig = crypto.createSign('RSA-SHA256').update(msg).sign(key, 'base64')
   const auth = `WECHATPAY2-SHA256-RSA2048 mchid="${WXPAY.spMchid}",nonce_str="${nonce}",signature="${sig}",timestamp="${ts}",serial_no="${serial}"`
   const resp = await fetch(`${WX_API}/v3/certificates`, {
-    headers: { Authorization: auth, Accept: 'application/json', 'User-Agent': 'twd-h5' }
+    // ⚠️ Accept-Language 必须显式给出：Node 的 fetch(undici) 默认会发 `Accept-Language: *`，
+    //    微信 v3 直接拒绝并返回 406「传入了不支持的Accept-Language」。
+    headers: { Authorization: auth, Accept: 'application/json', 'Accept-Language': 'zh-CN', 'User-Agent': 'twd-h5' }
   })
   if (!resp.ok) throw new Error('[wxpay] 获取平台证书失败：' + resp.status)
   const data = await resp.json()
@@ -82,6 +84,15 @@ export async function getPlatformCerts() {
   _platformCerts = map
   _certsFetchedAt = Date.now()
   return map
+}
+
+// 告警节流：同类问题 10 分钟内只打一次，避免刷屏
+let _lastWarnAt = 0
+function warnThrottled(msg) {
+  const now = Date.now()
+  if (now - _lastWarnAt < 10 * 60 * 1000) return
+  _lastWarnAt = now
+  console.warn(msg)
 }
 
 function decryptAesGcm(ciphertextB64, nonce, associatedData) {
@@ -116,20 +127,28 @@ export async function wxpayRequest(method, apiPath, bodyObj) {
   const headers = {
     Authorization: authHeader(method, apiPath, body),
     Accept: 'application/json',
+    // 见 getPlatformCerts 注释：不显式指定会被微信以 406 拒绝
+    'Accept-Language': 'zh-CN',
     'Content-Type': 'application/json',
     'User-Agent': 'twd-h5',
     'Wechatpay-Signature-Type': 'RSA'
   }
   const resp = await fetch(`${WX_API}${apiPath}`, { method, headers, body: body || undefined })
   const respBody = await resp.text()
-  // 验响应签名（用平台证书）
+  // 验响应签名（用平台证书）——**加固手段，不阻断业务**：
+  // 平台证书接口抖动不应升级为"全站支付不可用"（HTTPS 已保证传输层安全）。
   const whSig = resp.headers.get('wechatpay-signature')
   const whTs = resp.headers.get('wechatpay-timestamp')
   const whNonce = resp.headers.get('wechatpay-nonce')
   const whSerial = resp.headers.get('wechatpay-serial')
   if (whSig && whTs && whNonce) {
-    const certs = await getPlatformCerts()
-    const pub = certs.get(whSerial) || (whSerial ? null : null)
+    let pub = null
+    try {
+      const certs = await getPlatformCerts()
+      pub = certs.get(whSerial) || null
+    } catch (e) {
+      warnThrottled('[wxpay] 平台证书不可用，本次跳过响应验签：' + (e.message || e))
+    }
     if (pub) {
       const vmsg = `${whTs}\n${whNonce}\n${respBody}\n`
       const ok = crypto.createVerify('RSA-SHA256').update(vmsg).verify(pub, whSig, 'base64')

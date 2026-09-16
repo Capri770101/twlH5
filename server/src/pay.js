@@ -3,54 +3,23 @@
 //
 // 分账（profit_sharing）说明：
 //   settle_info.profit_sharing=true 只是把订单标记为「可分账」，资金随即进入分账冻结
-//   （普通服务商分账默认冻结 30 天，超期未发起分账会自动解冻给分账方）。
-//   因此**只在该店确实有佣金时**才标记 —— 否则零佣金门店的钱会被无谓冻结。
-//   ⚠️ 主动发起分账尚未实现（见 onPaid 里的说明），标记了却不去分账 = 资金白冻结。
+//   （普通服务商分账默认冻结 30 天，超期未发起分账会自动解冻给分账方），微信**不会自动分账**。
+//   因此只有「该店确实有佣金」**且**「分账队列真的启用」时才标记 —— 否则钱会被白冻。
+//   实际发起分账见 profitsharing.js（支付成功满 N 小时后扫描执行）。
 import express from 'express'
 import fs from 'fs'
-import path from 'path'
-import { fileURLToPath } from 'url'
 import { wxpayRequest, decryptResource, verifyNotify, buildJsapiPayParams, WXPAY, WX_API_BASE } from './wxpay.js'
-import { query } from './db.js'
 import { hq, withTx } from './h5db.js'
+import { resolveSubMch } from './submch.js'
+import {
+  PS, markPending, scanOnce, ensureReturnedBeforeRefund, psStatusForOrder, addReceiver,
+  calcCommission, forceShare, psStats
+} from './profitsharing.js'
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const router = express.Router()
 
-// ---------- sub_mchid 解析（shopId -> 子商户） ----------
-// 优先级：① server/config/submch.json（便于暂无 DB 时配置）② shops 表 sub_mchid 列
-let _submchCache = null
-function loadSubmchConfig() {
-  if (_submchCache) return _submchCache
-  // 以「src/..」即 server 目录为基准（本地 server/ 与线上 /opt/twlh5-server 两种布局均成立）
-  const p = path.join(__dirname, '..', 'config', 'submch.json')
-  try {
-    _submchCache = JSON.parse(fs.readFileSync(p, 'utf8'))
-  } catch (e) {
-    _submchCache = {}
-  }
-  return _submchCache
-}
-
-export async function resolveSubMch(shopId) {
-  const cfg = loadSubmchConfig()
-  if (cfg[shopId]) {
-    const m = cfg[shopId]
-    return { subMchid: m.subMchid, subAppid: m.subAppid || WXPAY.spAppid, settleRatio: m.settleRatio || 0 }
-  }
-  // 回退：读 shops 表（需 DB 可达）
-  try {
-    const rows = await query('SELECT sub_mchid, sub_appid, settle_ratio FROM `shops` WHERE id = ?', [shopId])
-    if (rows[0] && rows[0].sub_mchid) {
-      return {
-        subMchid: rows[0].sub_mchid,
-        subAppid: rows[0].sub_appid || WXPAY.spAppid,
-        settleRatio: Number(rows[0].settle_ratio) || 0
-      }
-    }
-  } catch (e) { /* DB 不可达则忽略，下面报错 */ }
-  throw new Error('未找到 shopId=' + shopId + ' 的子商户号 sub_mchid（请配置 server/config/submch.json 或 shops.sub_mchid）')
-}
+// 兼容旧引用：resolveSubMch 已移到 submch.js（pay.js 与 profitsharing.js 共用，避免循环 import）
+export { resolveSubMch }
 
 // ---------- 下单（JSAPI / H5） ----------
 // body: { shopId, outTradeNo, amountFen, description, openid?, tradeType?('JSAPI'|'H5'), clientIp? }
@@ -80,13 +49,18 @@ router.post('/order', async (req, res) => {
       notify_url: WXPAY.notifyUrl,
       amount: { total: dbAmount, currency: 'CNY' }
     }
-    // 仅当该店佣金 > 0 才标记需要分账（与小程序的规则一致）。
-    // 微信分账只能按金额、不能按比例，比例要自己算好金额后传（此处仅预判是否需分账）。
+    // 仅当「该店佣金 > 0」**且**「分账队列已启用」才标记需要分账。
+    // 只标记却不真正分账 = 花店资金被白冻 30 天，所以两个条件必须同时满足。
+    // 微信分账只能按金额（不能按比例），比例需自行折算成金额后传。
     const settleRatio = Number(sub.settleRatio) || 0
-    const commission = Math.floor(dbAmount * settleRatio / 100)
-    if (commission > 0) body.settle_info = { profit_sharing: true }
-    console.log('[pay] 下单 out_trade_no=%s shop=%s 金额=%d分 佣金比例=%s%% 佣金=%d分 标记分账=%s',
-      body.out_trade_no, ord.shop_id || shopId, dbAmount, settleRatio, commission, commission > 0 ? '是' : '否')
+    // 与分账执行端用同一个函数算佣金，避免"标记了却不分"或反之
+    const commission = calcCommission(dbAmount, settleRatio)
+    const psMarked = commission > 0 && PS.enabled
+    if (psMarked) body.settle_info = { profit_sharing: true }
+    console.log('[pay] 下单 out_trade_no=%s shop=%s 金额=%d分 佣金比例=%s%% 佣金=%d分 标记分账=%s%s',
+      body.out_trade_no, ord.shop_id || shopId, dbAmount, settleRatio, commission,
+      psMarked ? '是' : '否',
+      psMarked ? '' : (commission > 0 ? '（分账队列未启用）' : '（零佣金）'))
     if (tradeType === 'JSAPI') {
       if (!openid) return res.status(400).json({ error: 'JSAPI 需要 openid' })
       body.payer = { sp_openid: openid }
@@ -148,12 +122,26 @@ router.post('/refund', async (req, res) => {
     const { outTradeNo, reason, amountFen, shopId, subMchid } = req.body
     const sub = subMchid || (shopId ? (await resolveSubMch(shopId)).subMchid : null)
     if (!sub || !outTradeNo) return res.status(400).json({ error: 'missing outTradeNo/subMchid' })
+
+    // ① 已分账的订单必须先回退分账资金再退款
+    //    （微信规则：分账后退款需接收方同意，资金先回退到分账方账户；否则退款失败/资金对不上）
+    const ret = await ensureReturnedBeforeRefund(String(outTradeNo))
+    if (!ret.ok) return res.status(409).json({ error: ret.message || '分账回退未完成，暂不能退款' })
+
+    // ② 金额以库中订单为准：amount.total 必须是**原订单总额**，refund 才是退款额（支持部分退款）
+    const ordRows = await hq('SELECT id, total_price FROM orders WHERE id = ? LIMIT 1', [outTradeNo])
+    if (!ordRows.length) return res.status(404).json({ error: '订单不存在' })
+    const orderTotal = Math.round(Number(ordRows[0].total_price) || 0)
+    const refundFen = amountFen ? Math.round(Number(amountFen)) : orderTotal
+    if (!(refundFen > 0) || refundFen > orderTotal) {
+      return res.status(400).json({ error: '退款金额不合法（应为 1 ~ ' + orderTotal + ' 分）' })
+    }
     const body = {
       sub_mchid: sub,
       out_trade_no: String(outTradeNo),
       out_refund_no: 'R' + Date.now(),
       reason: String(reason || '用户申请退款').slice(0, 80),
-      amount: { refund: Math.round(Number(amountFen)), total: Math.round(Number(amountFen)), currency: 'CNY' }
+      amount: { refund: refundFen, total: orderTotal, currency: 'CNY' }
     }
     const r = await wxpayRequest('POST', '/v3/refund/domestic/refunds', body)
     return res.json(r)
@@ -220,23 +208,88 @@ async function onPaid(outTradeNo, transactionId, decrypted) {
     )
   })
   console.log('[pay] 支付成功已落库：', outTradeNo, transactionId)
-  // ⚠️ 主动分账（/v3/profitsharing/orders）尚未实现 —— 原有一个 WXPAY_TRIGGER_PROFITSHARING
-  //    开关下的桩实现已移除，原因是它实际不可能正确执行：
-  //      ① shopId 从订单号里 split('_') 猜（订单号是 T+时间戳+随机数，没有下划线）→ 必然取不到子商户
-  //      ② receivers 把佣金分给子商户自己且 amount=0 → 等于没分
-  //      ③ 缺 unfreeze_unsplit / 接收方自愈(receivers/add) / 退款前回退(return-orders) / 延迟调度
-  //    保留那个开关只会让人误以为「打开就能分账」。待移植小程序那套完整逻辑后再上线。
+  // 标记进入分账队列（零佣金门店自动跳过）。
+  // 刻意不向上抛错：微信回调返回非 200 会触发重试，而"钱已收"远比"分账标记被打断"重要；
+  // 万一标记失败，扫描任务只认 ps_state='pending'，可用 admin 接口手动补标（见 /ps/run）。
+  try {
+    await markPending(outTradeNo)
+  } catch (e) {
+    console.warn('[pay] 标记待分账失败（不影响支付落库）：', e.message)
+  }
 }
 
-/**
- * 说明：微信服务商分账需要主动调用接口，不是「配置了就会自动分」。
- * 完整实现应包含（参照 /opt/flower-shop/server.js 的既有实现）：
- *   1) 佣金 = floor(订单金额 × 该店 settleRatio%)，>0 才需要分账
- *   2) 延迟触发（小程序为订单完成后 24h）+ 每 10 分钟扫描补偿，防进程重启丢任务
- *   3) POST /v3/profitsharing/orders，receivers 指向服务商自身，带 unfreeze_unsplit 解冻余款
- *   4) 报 RECEIVER_NOT_EXIST → POST /v3/profitsharing/receivers/add 后重试（自愈）
- *   5) 退款前先 POST /v3/profitsharing/return-orders 回退已分账资金
- */
+// ---------- 分账运维接口（需 WXPAY_PS_ADMIN_TOKEN，未配置则整体关闭） ----------
+// 用于排障与真机联调：手动触发扫描 / 查订单分账状态 / 补加分账接收方。
+function psAdminGuard(req, res) {
+  const tok = String(process.env.WXPAY_PS_ADMIN_TOKEN || '')
+  if (!tok) return false // 未配置令牌 → 视为不开放（下面的路由会 404）
+  if (String(req.headers['x-ps-token'] || '') !== tok) {
+    res.status(401).json({ error: 'unauthorized' })
+    return null
+  }
+  return true
+}
+
+// 手动跑一次分账扫描（只处理到期的 pending 订单）
+router.post('/ps/run', async (req, res) => {
+  if (!process.env.WXPAY_PS_ADMIN_TOKEN) return res.status(404).json({ error: 'not found' })
+  const g = psAdminGuard(req, res); if (g !== true) return
+  try {
+    const r = await scanOnce()
+    return res.json({ ok: true, ...r })
+  } catch (e) {
+    return res.status(500).json({ error: String(e.message || e) })
+  }
+})
+
+// 手动对指定订单发起分账（忽略"满 24 小时"限制）——真机联调/排障用
+router.post('/ps/share/:id', async (req, res) => {
+  if (!process.env.WXPAY_PS_ADMIN_TOKEN) return res.status(404).json({ error: 'not found' })
+  const g = psAdminGuard(req, res); if (g !== true) return
+  try {
+    const r = await forceShare(String(req.params.id))
+    const after = await psStatusForOrder(String(req.params.id))
+    return res.json({ ok: !!r.ok, result: r, order: after })
+  } catch (e) {
+    return res.status(500).json({ error: String(e.message || e) })
+  }
+})
+
+// 分账总览（各状态订单数）
+router.get('/ps/stats', async (req, res) => {
+  if (!process.env.WXPAY_PS_ADMIN_TOKEN) return res.status(404).json({ error: 'not found' })
+  const g = psAdminGuard(req, res); if (g !== true) return
+  try {
+    return res.json({ ok: true, ...(await psStats()) })
+  } catch (e) {
+    return res.status(500).json({ error: String(e.message || e) })
+  }
+})
+
+// 查某订单的分账状态
+router.get('/ps/order/:id', async (req, res) => {
+  if (!process.env.WXPAY_PS_ADMIN_TOKEN) return res.status(404).json({ error: 'not found' })
+  const g = psAdminGuard(req, res); if (g !== true) return
+  try {
+    const r = await psStatusForOrder(String(req.params.id))
+    return res.json({ ok: !!r, order: r })
+  } catch (e) {
+    return res.status(500).json({ error: String(e.message || e) })
+  }
+})
+
+// 补加某店铺的分账接收方（幂等；正常流程会自动补加，这里仅用于预检）
+router.post('/ps/add-receiver', async (req, res) => {
+  if (!process.env.WXPAY_PS_ADMIN_TOKEN) return res.status(404).json({ error: 'not found' })
+  const g = psAdminGuard(req, res); if (g !== true) return
+  try {
+    const sub = await resolveSubMch(String((req.body && req.body.shopId) || 's001'))
+    const r = await addReceiver(sub.subMchid)
+    return res.json({ ok: true, subMchid: sub.subMchid, result: r })
+  } catch (e) {
+    return res.status(500).json({ error: String(e.message || e) })
+  }
+})
 
 // ---------- 支付配置自检（联调前先看这里缺什么） ----------
 router.get('/status', async (req, res) => {
@@ -257,7 +310,16 @@ router.get('/status', async (req, res) => {
     missing,
     checks: checks.map(({ key, ok, hint }) => ({ key, ok, hint })),
     notifyUrl: WXPAY.notifyUrl,
-    subMchProbe
+    subMchProbe,
+    // 分账队列状态：enabled=false 时下单不会打分账标记（资金直接结算给花店）
+    profitSharing: {
+      enabled: PS.enabled,
+      trigger: 'paid',
+      delayHours: PS.delayHours,
+      scanMinutes: Math.round(PS.scanMs / 60000),
+      defaultRatio: PS.defaultRatio,
+      adminApi: !!process.env.WXPAY_PS_ADMIN_TOKEN
+    }
   })
 })
 
