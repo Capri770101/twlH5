@@ -14,6 +14,8 @@ const routes = [
   { path: '/shops', name: 'shops', component: () => import('@/pages/Shops.vue') },
   { path: '/advisor', name: 'advisor', component: () => import('@/pages/Advisor.vue') },
   { path: '/login', name: 'login', component: () => import('@/pages/Login.vue') },
+  // PC 扫码后手机端打开的「确认授权登录」页（只有确认按钮）
+  { path: '/pc-confirm', name: 'pc-confirm', component: () => import('@/pages/PcConfirm.vue') },
   { path: '/settings', name: 'settings', component: () => import('@/pages/Settings.vue'), meta: { requiresAuth: true } },
   { path: '/favorites', name: 'favorites', component: () => import('@/pages/Favorites.vue') },
   { path: '/coupons', name: 'coupons', component: () => import('@/pages/CouponCenter.vue') },

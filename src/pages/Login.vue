@@ -30,7 +30,7 @@
             </div>
           </div>
           <div class="qr-hint">
-            请使用手机微信「扫一扫」<br />完成授权后电脑将自动登录
+            请使用手机微信「扫一扫」<br />在手机上点击「确认授权登录」后，电脑将自动登录
             <span v-if="isMobileEnv" class="qr-hint-sub">（或用另一台设备扫码 / 复制链接到微信打开）</span>
           </div>
           <button v-if="isMobileEnv" class="qr-copy" @click="onCopyLink">复制链接到微信打开</button>
@@ -162,11 +162,11 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import QRCode from 'qrcode'
 import NavBar from '@/components/NavBar.vue'
-import store, { login } from '@/store'
+import { login } from '@/store'
 import {
   loginByWechat, loginByWechatPc, loginByPhone, loginByPassword, registerAccount, sendSmsCode,
   isWechatEnv, buildWechatAuthUrl, buildWechatPcAuthUrl, fetchAuthConfig,
-  pcApprove, pcStatus, genPcTicket, WX_APPID
+  pcStatus, genPcTicket, WX_APPID
 } from '@/mock/api'
 import { toast } from '@/utils/toast'
 
@@ -344,7 +344,8 @@ function stopPcPoll() {
 async function genPcQr() {
   const ticket = genPcTicket()
   pcQrExpired.value = false
-  pcUrl.value = location.origin + '/login?pc=' + ticket
+  // 手机扫码后打开的是「确认授权登录」页（不再自动授权，必须用户点按钮确认）
+  pcUrl.value = location.origin + '/pc-confirm?pc=' + ticket
   try {
     pcQrData.value = await QRCode.toDataURL(pcUrl.value, { width: 320, margin: 1 })
   } catch (e) {
@@ -429,40 +430,15 @@ async function onCopyLink() {
   }
 }
 
-// ===== 手机端：扫 PC 二维码打开（?pc=票据）→ 授权登录后回传 =====
-// ⚠️ 票据一律走**入参**，不要存模块级变量：
-//    微信 OAuth 回跳那条路径里票据来自 URL 参数，而模块变量在那时还是空的
-//    （曾因此静默 return、一个请求都不发，PC 端永远停在"待授权"）。
-async function approvePhonePc(ticket) {
-  const t = ticket
-  if (!t) {
-    toast('未取到电脑端票据，请重新扫码')
-    return
-  }
-  try {
-    await pcApprove(t)
-    toast('已授权电脑登录，可关闭本页')
-  } catch (e) {
-    toast(e.message || '电脑端授权失败')
-  }
-}
-
-// 微信授权回跳：微信内 ?code=xxx&state=twd → loginByWechat；PC 扫码 ?code=xxx&state=twdpc → loginByWechatPc
-// pcTicket：手机扫 PC 码后 OAuth 回跳带的票据，登录成功后回传授权而不是跳个人页
-async function wechatLoginByCode(code, state, pcTicket) {
+// 微信授权回跳：微信内 ?code=xxx&state=twd → loginByWechat；PC 开放平台 ?code=xxx&state=twdpc → loginByWechatPc
+async function wechatLoginByCode(code, state) {
   try {
     const clean = location.href.split('?')[0] + (location.search.replace(/[?&](code|state|pc)=[^&]*/g, '').replace(/^&/, '?'))
     history.replaceState(null, '', clean)
     const { userInfo, token } = state === 'twdpc'
       ? await loginByWechatPc({ code })   // PC 开放平台扫码（unionid 跨端归一）
       : await loginByWechat({ code })     // 微信内公众号网页授权
-    if (pcTicket) {
-      // 手机扫 PC 码场景：登录后把票据授权给电脑，停留本页提示可关闭
-      login(userInfo, token)
-      await approvePhonePc(pcTicket)
-    } else {
-      finishLogin(userInfo, token)
-    }
+    finishLogin(userInfo, token)
   } catch (e) {
     toast(e.message || '微信登录失败，请重试')
   }
@@ -470,23 +446,15 @@ async function wechatLoginByCode(code, state, pcTicket) {
 
 onMounted(() => {
   const q = route.query
-  if (q.code && (q.state === 'twd' || q.state === 'twdpc')) {
-    const pc = (q.pc && /^[a-f0-9]{16,64}$/i.test(String(q.pc))) ? String(q.pc) : ''
-    wechatLoginByCode(String(q.code), String(q.state), pc)
+  // 手机扫 PC 二维码：统一交给 /pc-confirm 处理（登录 + 用户点确认后才授权）
+  // ⚠️ 必须在 code 分支之前判断，且转发全部 query（可能已带 code/state 从微信回跳而来）
+  if (q.pc) {
+    router.replace({ path: '/pc-confirm', query: q })
     return
   }
-  // 扫 PC 二维码打开：已登录直接授权；未登录走微信授权（snsapi_userinfo 有同意框，不静默）
-  const pc = (q.pc && /^[a-f0-9]{16,64}$/i.test(String(q.pc))) ? String(q.pc) : ''
-  if (pc) {
-    if (store.isLogged && store.token && !String(store.token).startsWith('mock_')) {
-      approvePhonePc(pc)
-      return
-    }
-    if (wechatEnv && WX_APPID) {
-      const authUrl = buildWechatAuthUrl(location.href) // redirect_uri 保留 ?pc= 票据
-      if (authUrl) { location.href = authUrl; return }
-    }
-    toast('请在手机微信中扫码打开')
+  if (q.code && (q.state === 'twd' || q.state === 'twdpc')) {
+    wechatLoginByCode(String(q.code), String(q.state))
+    return
   }
   // 注：PC 端二维码改为「点微信扫码登录」后才出码（不再自动出码），见 showPcQrView
 })
