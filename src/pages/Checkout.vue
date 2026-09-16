@@ -295,10 +295,23 @@
   </div>
   <AddressManager v-model="showAddr" />
 
+  <!-- PC 扫码支付面板（非微信环境下单后弹出；手机扫码付） -->
+  <QrPayPanel
+    v-model:visible="qrPay.visible"
+    :out-trade-no="qrPay.outTradeNo"
+    :shop-id="qrPay.shopId"
+    :amount-fen="qrPay.amountFen"
+    :qr-data-url="qrPay.qrDataUrl"
+    :code-url="qrPay.codeUrl"
+    @success="onQrPaid"
+    @close="onQrClose"
+    @expire="onQrClose"
+  />
+
 </template>
 
 <script setup>
-import { ref, computed, onUnmounted } from 'vue'
+import { ref, reactive, computed, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { createOrder, getDeliveryDates, payOrder } from '@/mock/api'
 import {
@@ -313,9 +326,37 @@ import { isWeChat, invokeWxPay } from '@/utils/wxpay'
 import NavBar from '@/components/NavBar.vue'
 import FlowerImage from '@/components/FlowerImage.vue'
 import AddressManager from '@/components/AddressManager.vue'
+import QrPayPanel from '@/components/QrPayPanel.vue'
 import { toast } from '@/utils/toast'
 
 const router = useRouter()
+
+// PC 扫码支付（Native）面板状态：只有非微信环境才会用到
+const qrPay = reactive({
+  visible: false,
+  outTradeNo: '',
+  shopId: '',
+  amountFen: 0,
+  qrDataUrl: '',
+  codeUrl: ''
+})
+// 扫码支付成功：此时才清购物车并进订单详情
+function onQrPaid() {
+  const id = qrPay.outTradeNo
+  qrPay.visible = false
+  clearCart()
+  toast('支付成功')
+  router.replace({ name: 'order-detail', params: { id } })
+}
+// 取消 / 二维码失效：订单已创建，引导去订单页稍后支付
+function onQrClose() {
+  const id = qrPay.outTradeNo
+  qrPay.visible = false
+  if (!id) return
+  clearCart()
+  toast('订单已创建，可稍后在订单页完成支付')
+  router.replace({ name: 'order-detail', params: { id } })
+}
 
 const pickupMethod = ref('delivery')
 const address = computed(() => store.selectedAddress || { name: '', phone: '', detail: '请选择收货地址' })
@@ -441,10 +482,23 @@ async function onSubmit() {
     const outTradeNo = res.id
     const shopId = (groupedCart.value[0] && groupedCart.value[0].shopId) || 'default'
     const amountFen = payAmount.value
-    const tradeType = isWeChat() ? 'JSAPI' : 'H5'
+    // 通道：微信内 JSAPI（WeixinJSBridge 拉起）；PC/外部浏览器走 Native 扫码
+    // （MWEB 面向手机浏览器、桌面体验差；Native 才是 PC 的标准做法）
+    const tradeType = isWeChat() ? 'JSAPI' : 'NATIVE'
     const openid = (store.userInfo && store.userInfo.openid) || ''
     try {
       const pay = await payOrder({ shopId, outTradeNo, amountFen, description: '跳舞兰AI花店订单', openid, tradeType })
+      if (pay.tradeType === 'NATIVE') {
+        // PC：弹二维码由手机扫码。此处**不清购物车、不跳转** —— 结果交给面板回调，
+        // 否则用户扫了码没付成、购物车却已空。
+        qrPay.outTradeNo = outTradeNo
+        qrPay.shopId = shopId
+        qrPay.amountFen = amountFen
+        qrPay.qrDataUrl = pay.qrDataUrl || ''
+        qrPay.codeUrl = pay.code_url || ''
+        qrPay.visible = true
+        return
+      }
       if (pay.tradeType === 'H5' && pay.h5_url) {
         clearCart()
         location.href = pay.h5_url // 跳微信 App 收银台（外部浏览器）

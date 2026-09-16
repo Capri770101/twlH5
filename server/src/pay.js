@@ -71,6 +71,12 @@ router.post('/order', async (req, res) => {
     // 曾把 sub_appid 回落成服务商自己的 appid → 微信判为非法请求（400 INVALID_REQUEST），
     // 导致 H5 的下单接口一直失败。留空则由微信按 sp_appid 下的 openid 处理。
     if (sub.subAppid && sub.subAppid !== WXPAY.spAppid) body.sub_appid = sub.subAppid
+    // ⚠️ 这里**不要**预先关单！
+    // 实测（2026-09-16）：对从未下单过的 out_trade_no 调关单，微信返回成功（204），
+    // 随后再用同一 out_trade_no 下单就报
+    //   400 INVALID_REQUEST「请求重入时，参数与首次请求时不一致」
+    // 即"先关后下"会把订单号提前废掉。改回：仅当确实存在未支付单时才关（见 /order 上层逻辑），
+    // 此处不做任何预处理。
     // 仅当「该店佣金 > 0」**且**「分账队列已启用」才标记需要分账。
     // 只标记却不真正分账 = 花店资金被白冻 30 天，所以两个条件必须同时满足。
     // 微信分账只能按金额（不能按比例），比例需自行折算成金额后传。
@@ -86,9 +92,9 @@ router.post('/order', async (req, res) => {
     if (tradeType === 'JSAPI') {
       if (!openid) return res.status(400).json({ error: 'JSAPI 需要 openid' })
       body.payer = { sp_openid: openid }
-    } else {
+    } else if (tradeType === 'H5') {
       // H5(MWEB) 支付：scene_info.payer_client_ip 是**微信必填**（用于风控），缺了直接 400
-      // （原实现漏了这个字段 → 外部浏览器支付一直失败，且错误信息只显示 PARAM_ERROR 难定位）
+      // ⚠️ 只有 H5 需要 scene_info；NATIVE 带上会被判「含未定义参数」
       const ip = resolveClientIp(req, clientIp)
       if (!ip) {
         return res.status(400).json({ error: 'H5 支付需要有效的用户终端 IPv4（scene_info.payer_client_ip）' })
@@ -104,7 +110,9 @@ router.post('/order', async (req, res) => {
     }
     const apiPath = tradeType === 'H5'
       ? '/v3/pay/partner/transactions/h5'
-      : '/v3/pay/partner/transactions/jsapi'
+      : tradeType === 'NATIVE'
+        ? '/v3/pay/partner/transactions/native'
+        : '/v3/pay/partner/transactions/jsapi'
     const r = await wxpayRequest('POST', apiPath, body)
     if (tradeType === 'H5') {
       let h5Url = r.h5_url
@@ -112,6 +120,18 @@ router.post('/order', async (req, res) => {
         h5Url += (h5Url.includes('?') ? '&' : '?') + 'redirect_url=' + encodeURIComponent(WXPAY.h5RedirectUrl)
       }
       return res.json({ tradeType: 'H5', h5_url: h5Url })
+    }
+    if (tradeType === 'NATIVE') {
+      // PC 扫码支付：微信返回 code_url（weixin://wxpay/bizpayurl?pr=xxx）
+      // 二维码在后端生成 data URL —— 只有 PC 用得到，不必为此给移动端也打包一个 QR 库
+      let qrDataUrl = ''
+      try {
+        const QR = await import('qrcode')
+        qrDataUrl = await QR.toDataURL(r.code_url, { margin: 1, width: 320 })
+      } catch (e) {
+        console.warn('[pay] 生成二维码失败（前端可自行用 code_url 渲染）：', e.message)
+      }
+      return res.json({ tradeType: 'NATIVE', code_url: r.code_url, qrDataUrl })
     }
     const payParams = buildJsapiPayParams(r.prepay_id, WXPAY.spAppid)
     return res.json({ tradeType: 'JSAPI', ...payParams })
@@ -129,6 +149,15 @@ router.get('/query/:outTradeNo', async (req, res) => {
     const r = await wxpayRequest('GET',
       `/v3/pay/partner/transactions/out-trade-no/${encodeURIComponent(req.params.outTradeNo)}` +
       `?sp_mchid=${encodeURIComponent(WXPAY.spMchid)}&sub_mchid=${encodeURIComponent(subMchid)}`)
+    // 自愈：微信侧已支付、而本地订单仍是待支付（回调丢失或延迟）→ 就地补记。
+    // PC 扫码支付靠轮询这个接口，没有它就可能"钱付了、页面还显示待付款"。
+    if (r && r.trade_state === 'SUCCESS') {
+      try {
+        await onPaid(String(req.params.outTradeNo), r.transaction_id, r, 'native')
+      } catch (e) {
+        console.warn('[pay] 查询补记支付状态失败：', e.message)
+      }
+    }
     return res.json(r)
   } catch (e) {
     return res.status(500).json({ error: String(e.message || e) })
@@ -214,7 +243,8 @@ export async function handleNotify(rawBody, headers) {
 }
 
 // 支付成功：h5_shop.orders pending→paid + 落 payments 流水（幂等：仅首次生效）
-async function onPaid(outTradeNo, transactionId, decrypted) {
+// channelHint：渠道兜底值（如 'native'）——仅用于 payments.channel 归类，不影响资金
+async function onPaid(outTradeNo, transactionId, decrypted, channelHint) {
   // ⚠️ 失败必须向上抛（handleNotify 会返回 5xx 让微信重试），不能吞掉，
   //    否则会出现「钱已收、订单永久待付款」的资损。
   await withTx(async conn => {
@@ -233,7 +263,7 @@ async function onPaid(outTradeNo, transactionId, decrypted) {
       ? Math.round(Number(decrypted.amount.payer_total))
       : o.total_price
     // JSAPI 回调带 payer(openid)，H5(MWEB) 无 payer → 用于区分 channel
-    const channel = decrypted && decrypted.payer ? 'jsapi' : 'h5'
+    const channel = channelHint || (decrypted && decrypted.payer ? 'jsapi' : 'h5')
     await conn.query(
       `INSERT INTO payments (order_id, out_trade_no, transaction_id, channel, amount, status, sub_mchid, raw_callback)
        VALUES (?, ?, ?, ?, ?, 'success', ?, ?)`,

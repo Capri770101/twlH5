@@ -93,23 +93,48 @@
 
     <RefundDialog v-model:visible="showRefund" :order="refundTarget" @success="onRefundSuccess" @error="toast" />
   </div>
+
+  <!-- PC 扫码支付面板（非微信环境重新支付时弹出） -->
+  <QrPayPanel
+    v-model:visible="qrPay.visible"
+    :out-trade-no="qrPay.outTradeNo"
+    :shop-id="qrPay.shopId"
+    :amount-fen="qrPay.amountFen"
+    :qr-data-url="qrPay.qrDataUrl"
+    :code-url="qrPay.codeUrl"
+    @success="onQrPaid"
+    @close="onQrClose"
+    @expire="onQrClose"
+  />
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getOrderList, cancelOrder, payOrder } from '@/mock/api'
 import { money, addToCart } from '@/store'
+import store from '@/store'
 import { isWeChat, invokeWxPay } from '@/utils/wxpay'
 import NavBar from '@/components/NavBar.vue'
 import FlowerImage from '@/components/FlowerImage.vue'
 import RefundDialog from '@/components/RefundDialog.vue'
 import StateBlock from '@/components/StateBlock.vue'
+import QrPayPanel from '@/components/QrPayPanel.vue'
 import { toast } from '@/utils/toast'
 
 const route = useRoute()
 const router = useRouter()
 const rpx = n => `${n / 750}rem`
+
+// PC 扫码支付（Native）面板状态
+const qrPay = reactive({
+  visible: false,
+  outTradeNo: '',
+  shopId: '',
+  amountFen: 0,
+  qrDataUrl: '',
+  codeUrl: ''
+})
 
 const tabs = [
   { label: '全部', value: 'all' },
@@ -188,11 +213,11 @@ async function onCancel(order) {
   }
 }
 
-// 待付款订单：重新拉起支付（微信内 JSAPI / 外部浏览器跳 H5 收银台）
+// 待付款订单：重新拉起支付（微信内 JSAPI / PC 走 Native 扫码）
 async function onPay(order) {
   if (!order || actingId.value) return
-  const openid = ''
-  const tradeType = isWeChat() ? 'JSAPI' : 'H5'
+  const openid = (store.userInfo && store.userInfo.openid) || ''
+  const tradeType = isWeChat() ? 'JSAPI' : 'NATIVE'
   actingId.value = order.id
   try {
     const pay = await payOrder({
@@ -203,6 +228,16 @@ async function onPay(order) {
       openid,
       tradeType
     })
+    if (pay.tradeType === 'NATIVE') {
+      // PC：弹二维码由手机扫码（结果交给面板回调）
+      qrPay.outTradeNo = order.id
+      qrPay.shopId = order.shopId || 'default'
+      qrPay.amountFen = order.totalPrice || 0
+      qrPay.qrDataUrl = pay.qrDataUrl || ''
+      qrPay.codeUrl = pay.code_url || ''
+      qrPay.visible = true
+      return
+    }
     if (pay.tradeType === 'H5' && pay.h5_url) {
       location.href = pay.h5_url
       return
@@ -218,6 +253,16 @@ async function onPay(order) {
   } finally {
     actingId.value = ''
   }
+}
+
+// PC 扫码支付成功 → 刷新列表（订单状态由后端落库）
+function onQrPaid() {
+  qrPay.visible = false
+  toast('支付成功')
+  load()
+}
+function onQrClose() {
+  qrPay.visible = false
 }
 
 

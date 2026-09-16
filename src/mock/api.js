@@ -67,6 +67,10 @@ export async function payOrder({ shopId, outTradeNo, amountFen, description, ope
   }
   await delay(500)
   const inWeChat = typeof navigator !== 'undefined' && /micromessenger/i.test(navigator.userAgent)
+  if (tradeType === 'NATIVE') {
+    // PC 扫码支付：真实后端会额外返回 qrDataUrl（服务端生成二维码）；mock 只给 code_url
+    return { tradeType: 'NATIVE', code_url: 'weixin://wxpay/bizpayurl?pr=mock_' + outTradeNo, qrDataUrl: '' }
+  }
   if (tradeType === 'H5' || !inWeChat) {
     // 外部浏览器：返回 h5_url（mock 仅占位，实际由后端返回微信收银台链接）
     return { tradeType: 'H5', h5_url: 'weixin://wxpay/bizpayurl?pr=mock_' + outTradeNo }
@@ -93,6 +97,19 @@ export async function queryPayOrder(outTradeNo, subMchid) {
   }
   await delay(200)
   return { trade_state: 'SUCCESS', out_trade_no: outTradeNo }
+}
+
+/**
+ * 按 shopId 查支付状态（PC 扫码支付面板轮询用；等价于上面但不必知道 sub_mchid）。
+ * 注意：后端 /api/pay/query 在 trade_state=SUCCESS 时会就地补记订单（回调丢失自愈），
+ * 所以这个调用同时也是「催一次落库」。
+ */
+export async function payQueryStatus(outTradeNo, shopId) {
+  if (REAL_API_ENABLED) {
+    return await realApi(`/pay/query/${encodeURIComponent(outTradeNo)}`, { shopId: shopId || '' })
+  }
+  await delay(200)
+  return { trade_state: 'NOTPAY', out_trade_no: outTradeNo }
 }
 
 
