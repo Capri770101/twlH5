@@ -1,5 +1,11 @@
 // 微信支付「服务商模式」支付路由：下单(JSAPI/H5) / 查询 / 关单 / 退款 / 回调
-// 复用跳舞兰服务商号 + 各花店 sub_mchid；下单带 settle_info.profit_sharing=true → 触发已配置的自动分账。
+// 复用跳舞兰服务商号 + 各花店 sub_mchid。
+//
+// 分账（profit_sharing）说明：
+//   settle_info.profit_sharing=true 只是把订单标记为「可分账」，资金随即进入分账冻结
+//   （普通服务商分账默认冻结 30 天，超期未发起分账会自动解冻给分账方）。
+//   因此**只在该店确实有佣金时**才标记 —— 否则零佣金门店的钱会被无谓冻结。
+//   ⚠️ 主动发起分账尚未实现（见 onPaid 里的说明），标记了却不去分账 = 资金白冻结。
 import express from 'express'
 import fs from 'fs'
 import path from 'path'
@@ -72,9 +78,15 @@ router.post('/order', async (req, res) => {
       description: String(description || '跳舞兰AI花店订单').slice(0, 127),
       out_trade_no: String(outTradeNo),
       notify_url: WXPAY.notifyUrl,
-      settle_info: { profit_sharing: true }, // 触发已绑定的自动分账
       amount: { total: dbAmount, currency: 'CNY' }
     }
+    // 仅当该店佣金 > 0 才标记需要分账（与小程序的规则一致）。
+    // 微信分账只能按金额、不能按比例，比例要自己算好金额后传（此处仅预判是否需分账）。
+    const settleRatio = Number(sub.settleRatio) || 0
+    const commission = Math.floor(dbAmount * settleRatio / 100)
+    if (commission > 0) body.settle_info = { profit_sharing: true }
+    console.log('[pay] 下单 out_trade_no=%s shop=%s 金额=%d分 佣金比例=%s%% 佣金=%d分 标记分账=%s',
+      body.out_trade_no, ord.shop_id || shopId, dbAmount, settleRatio, commission, commission > 0 ? '是' : '否')
     if (tradeType === 'JSAPI') {
       if (!openid) return res.status(400).json({ error: 'JSAPI 需要 openid' })
       body.payer = { sp_openid: openid }
@@ -208,29 +220,23 @@ async function onPaid(outTradeNo, transactionId, decrypted) {
     )
   })
   console.log('[pay] 支付成功已落库：', outTradeNo, transactionId)
-  if (process.env.WXPAY_TRIGGER_PROFITSHARING === 'true') {
-    try {
-      await triggerProfitSharing(outTradeNo, transactionId)
-    } catch (e) {
-      console.warn('[pay] 主动分账失败：', e.message)
-    }
-  }
+  // ⚠️ 主动分账（/v3/profitsharing/orders）尚未实现 —— 原有一个 WXPAY_TRIGGER_PROFITSHARING
+  //    开关下的桩实现已移除，原因是它实际不可能正确执行：
+  //      ① shopId 从订单号里 split('_') 猜（订单号是 T+时间戳+随机数，没有下划线）→ 必然取不到子商户
+  //      ② receivers 把佣金分给子商户自己且 amount=0 → 等于没分
+  //      ③ 缺 unfreeze_unsplit / 接收方自愈(receivers/add) / 退款前回退(return-orders) / 延迟调度
+  //    保留那个开关只会让人误以为「打开就能分账」。待移植小程序那套完整逻辑后再上线。
 }
 
-// 主动发起分账（仅当未用平台自动分账时开启 WXPAY_TRIGGER_PROFITSHARING=true）
-async function triggerProfitSharing(outTradeNo, transactionId) {
-  const shopId = (outTradeNo.split('_')[0] || '').replace(/^S/, '')
-  const sub = await resolveSubMch(shopId).catch(() => null)
-  if (!sub) return
-  await wxpayRequest('POST', '/v3/profitsharing/orders', {
-    appid: WXPAY.spAppid,
-    sub_mchid: sub.subMchid,
-    transaction_id: transaction_id,
-    out_order_no: 'PS' + outTradeNo,
-    receivers: [{ type: 'MERCHANT_ID', receiver_account: sub.subMchid, amount: 0, description: '自动分账' }],
-    finish: true
-  })
-}
+/**
+ * 说明：微信服务商分账需要主动调用接口，不是「配置了就会自动分」。
+ * 完整实现应包含（参照 /opt/flower-shop/server.js 的既有实现）：
+ *   1) 佣金 = floor(订单金额 × 该店 settleRatio%)，>0 才需要分账
+ *   2) 延迟触发（小程序为订单完成后 24h）+ 每 10 分钟扫描补偿，防进程重启丢任务
+ *   3) POST /v3/profitsharing/orders，receivers 指向服务商自身，带 unfreeze_unsplit 解冻余款
+ *   4) 报 RECEIVER_NOT_EXIST → POST /v3/profitsharing/receivers/add 后重试（自愈）
+ *   5) 退款前先 POST /v3/profitsharing/return-orders 回退已分账资金
+ */
 
 // ---------- 支付配置自检（联调前先看这里缺什么） ----------
 router.get('/status', async (req, res) => {
