@@ -114,7 +114,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { getOrderList, cancelOrder, payOrder } from '@/mock/api'
 import { money, addToCart } from '@/store'
 import store from '@/store'
-import { isWeChat, invokeWxPay } from '@/utils/wxpay'
+import { isMobileWeChat, invokeWxPay, payFailHint } from '@/utils/wxpay'
 import NavBar from '@/components/NavBar.vue'
 import FlowerImage from '@/components/FlowerImage.vue'
 import RefundDialog from '@/components/RefundDialog.vue'
@@ -217,7 +217,8 @@ async function onCancel(order) {
 async function onPay(order) {
   if (!order || actingId.value) return
   const openid = (store.userInfo && store.userInfo.openid) || ''
-  const tradeType = isWeChat() ? 'JSAPI' : 'NATIVE'
+  // 只有**手机**微信能用 JSAPI；微信电脑版/普通浏览器一律走 Native 扫码
+    const tradeType = isMobileWeChat() ? 'JSAPI' : 'NATIVE'
   actingId.value = order.id
   try {
     const pay = await payOrder({
@@ -249,7 +250,7 @@ async function onPay(order) {
     }
     toast('支付暂不可用，请稍后重试')
   } catch (e) {
-    toast('支付未完成，可稍后重试')
+    toast(payFailHint(e))
   } finally {
     actingId.value = ''
   }

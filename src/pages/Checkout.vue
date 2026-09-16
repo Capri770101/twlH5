@@ -322,7 +322,7 @@ import {
   money
 } from '@/store'
 import store from '@/store'
-import { isWeChat, invokeWxPay } from '@/utils/wxpay'
+import { isMobileWeChat, invokeWxPay, payFailHint } from '@/utils/wxpay'
 import NavBar from '@/components/NavBar.vue'
 import FlowerImage from '@/components/FlowerImage.vue'
 import AddressManager from '@/components/AddressManager.vue'
@@ -484,7 +484,8 @@ async function onSubmit() {
     const amountFen = payAmount.value
     // 通道：微信内 JSAPI（WeixinJSBridge 拉起）；PC/外部浏览器走 Native 扫码
     // （MWEB 面向手机浏览器、桌面体验差；Native 才是 PC 的标准做法）
-    const tradeType = isWeChat() ? 'JSAPI' : 'NATIVE'
+    // 只有**手机**微信能用 JSAPI；微信电脑版/普通浏览器一律走 Native 扫码
+    const tradeType = isMobileWeChat() ? 'JSAPI' : 'NATIVE'
     const openid = (store.userInfo && store.userInfo.openid) || ''
     try {
       const pay = await payOrder({ shopId, outTradeNo, amountFen, description: '跳舞兰AI花店订单', openid, tradeType })
@@ -510,9 +511,9 @@ async function onSubmit() {
       clearCart()
       router.replace({ name: 'order-detail', params: { id: outTradeNo } })
     } catch (e) {
-      // 支付未调起（如微信内缺 openid）：订单已建，引导去订单页稍后支付
+      // 支付未调起：订单已建，按失败原因给出可执行的指引（环境不支持 / 权限未开通 各不相同）
       clearCart()
-      toast('订单已创建，可稍后在订单页完成支付')
+      toast(payFailHint(e))
       router.replace({ name: 'order-detail', params: { id: outTradeNo } })
     }
   } catch (e) {
