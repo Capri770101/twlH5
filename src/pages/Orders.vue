@@ -100,6 +100,7 @@
     :out-trade-no="qrPay.outTradeNo"
     :shop-id="qrPay.shopId"
     :amount-fen="qrPay.amountFen"
+    :mode="qrPay.mode"
     :qr-data-url="qrPay.qrDataUrl"
     :code-url="qrPay.codeUrl"
     @success="onQrPaid"
@@ -115,6 +116,7 @@ import { getOrderList, cancelOrder, payOrder } from '@/mock/api'
 import { money, addToCart } from '@/store'
 import store from '@/store'
 import { isMobileWeChat, invokeWxPay, payFailHint } from '@/utils/wxpay'
+import { linkQrDataUrl, mobilePayUrl } from '@/utils/qr'
 import NavBar from '@/components/NavBar.vue'
 import FlowerImage from '@/components/FlowerImage.vue'
 import RefundDialog from '@/components/RefundDialog.vue'
@@ -132,9 +134,25 @@ const qrPay = reactive({
   outTradeNo: '',
   shopId: '',
   amountFen: 0,
+  mode: 'native', // native=微信支付码 / link=兜底（二维码指向手机支付页）
   qrDataUrl: '',
   codeUrl: ''
 })
+
+// PC 兜底通道：二维码指向「手机支付页」，用户手机微信扫码后在手机上用 JSAPI 付款
+async function openLinkQrPay(id, shop, amountFen) {
+  const url = mobilePayUrl(id)
+  const qrDataUrl = await linkQrDataUrl(url)
+  if (!qrDataUrl) return false
+  qrPay.outTradeNo = id
+  qrPay.shopId = shop
+  qrPay.amountFen = amountFen
+  qrPay.mode = 'link'
+  qrPay.qrDataUrl = qrDataUrl
+  qrPay.codeUrl = url
+  qrPay.visible = true
+  return true
+}
 
 const tabs = [
   { label: '全部', value: 'all' },
@@ -213,27 +231,37 @@ async function onCancel(order) {
   }
 }
 
-// 待付款订单：重新拉起支付（微信内 JSAPI / PC 走 Native 扫码）
+// 待付款订单：重新拉起支付（手机微信 JSAPI / PC 走扫码）
 async function onPay(order) {
   if (!order || actingId.value) return
   const openid = (store.userInfo && store.userInfo.openid) || ''
-  // 只有**手机**微信能用 JSAPI；微信电脑版/普通浏览器一律走 Native 扫码
-    const tradeType = isMobileWeChat() ? 'JSAPI' : 'NATIVE'
+  // 只有**手机**微信能用 JSAPI；微信电脑版/普通浏览器一律走扫码
+  const tradeType = isMobileWeChat() ? 'JSAPI' : 'NATIVE'
   actingId.value = order.id
   try {
-    const pay = await payOrder({
-      shopId: order.shopId || 'default',
-      outTradeNo: order.id,
-      amountFen: order.totalPrice || 0,
-      description: '跳舞兰AI花店订单',
-      openid,
-      tradeType
-    })
+    let pay
+    try {
+      pay = await payOrder({
+        shopId: order.shopId || 'default',
+        outTradeNo: order.id,
+        amountFen: order.totalPrice || 0,
+        description: '跳舞兰AI花店订单',
+        openid,
+        tradeType
+      })
+    } catch (e) {
+      // PC：Native 权限未开通（NO_AUTH）→ 兜底成「手机支付页」二维码
+      if (!isMobileWeChat() && /NO_AUTH|未开通|未授权/i.test(String((e && e.message) || ''))) {
+        if (await openLinkQrPay(order.id, order.shopId || 'default', order.totalPrice || 0)) return
+      }
+      throw e
+    }
     if (pay.tradeType === 'NATIVE') {
       // PC：弹二维码由手机扫码（结果交给面板回调）
       qrPay.outTradeNo = order.id
       qrPay.shopId = order.shopId || 'default'
       qrPay.amountFen = order.totalPrice || 0
+      qrPay.mode = 'native'
       qrPay.qrDataUrl = pay.qrDataUrl || ''
       qrPay.codeUrl = pay.code_url || ''
       qrPay.visible = true

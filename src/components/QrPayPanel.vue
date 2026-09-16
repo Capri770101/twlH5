@@ -3,12 +3,12 @@
     <div v-if="visible" class="qrpay-mask" @click.self="onCancel">
       <div class="qrpay-card">
         <div class="qrpay-head">
-          <span class="qrpay-title">微信扫码支付</span>
+          <span class="qrpay-title">{{ isLink ? '手机扫码支付' : '微信扫码支付' }}</span>
           <span class="qrpay-amount">¥{{ money(amountFen) }}</span>
         </div>
 
         <div class="qrpay-qrbox">
-          <img v-if="qrDataUrl" class="qrpay-qr" :src="qrDataUrl" alt="微信支付二维码" />
+          <img v-if="qrDataUrl" class="qrpay-qr" :src="qrDataUrl" alt="支付二维码" />
           <div v-else class="qrpay-qrfallback">
             <div class="qrpay-emoji">📱</div>
             <p>二维码未能生成，请改用手机打开本页支付</p>
@@ -16,7 +16,12 @@
           </div>
         </div>
 
-        <div class="qrpay-hint">
+        <div v-if="isLink" class="qrpay-hint">
+          请用手机<b>微信「扫一扫」</b>扫描二维码<br />
+          在<b>手机上</b>完成支付
+          <div class="qrpay-sub">支付完成后本页会自动跳转，请勿关闭</div>
+        </div>
+        <div v-else class="qrpay-hint">
           请用手机<b>微信「扫一扫」</b>扫描二维码完成支付
           <div class="qrpay-sub">支付完成后本页会自动跳转，请勿关闭</div>
         </div>
@@ -46,9 +51,15 @@ const props = defineProps({
   shopId: { type: String, default: '' },
   amountFen: { type: Number, default: 0 },
   qrDataUrl: { type: String, default: '' },
-  codeUrl: { type: String, default: '' }
+  codeUrl: { type: String, default: '' },
+  // native = 微信 Native 支付码（扫码直接进收银台）
+  // link   = 兜底：二维码指向「手机支付页」，用户在手机上点一下再付
+  //          （Native 权限未开通时用，不需要额外开通任何支付产品）
+  mode: { type: String, default: 'native' }
 })
 const emit = defineEmits(['success', 'close', 'expire', 'update:visible'])
+
+const isLink = computed(() => props.mode === 'link')
 
 const POLL_MS = 3000
 const MAX_TRIES = 100 // 约 5 分钟

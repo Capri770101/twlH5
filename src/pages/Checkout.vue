@@ -301,6 +301,7 @@
     :out-trade-no="qrPay.outTradeNo"
     :shop-id="qrPay.shopId"
     :amount-fen="qrPay.amountFen"
+    :mode="qrPay.mode"
     :qr-data-url="qrPay.qrDataUrl"
     :code-url="qrPay.codeUrl"
     @success="onQrPaid"
@@ -323,6 +324,7 @@ import {
 } from '@/store'
 import store from '@/store'
 import { isMobileWeChat, invokeWxPay, payFailHint } from '@/utils/wxpay'
+import { linkQrDataUrl, mobilePayUrl } from '@/utils/qr'
 import NavBar from '@/components/NavBar.vue'
 import FlowerImage from '@/components/FlowerImage.vue'
 import AddressManager from '@/components/AddressManager.vue'
@@ -331,15 +333,34 @@ import { toast } from '@/utils/toast'
 
 const router = useRouter()
 
-// PC 扫码支付（Native）面板状态：只有非微信环境才会用到
+// PC 扫码支付（Native）面板状态：只有非手机微信才会用到
 const qrPay = reactive({
   visible: false,
   outTradeNo: '',
   shopId: '',
   amountFen: 0,
+  mode: 'native', // native=微信支付码 / link=兜底（二维码指向手机支付页）
   qrDataUrl: '',
   codeUrl: ''
 })
+/**
+ * PC 兜底通道：把二维码指向「手机支付页」（/login?redirect=/pay/xxx）。
+ * 用户手机微信扫码 → 自动授权登录 → 在手机上点确认支付（JSAPI）→ PC 轮询到已支付自动跳转。
+ * 好处：完全不需要开通 Native / H5支付 权限。
+ */
+async function openLinkQrPay(id, shop, amountFen) {
+  const url = mobilePayUrl(id)
+  const qrDataUrl = await linkQrDataUrl(url)
+  if (!qrDataUrl) return false
+  qrPay.outTradeNo = id
+  qrPay.shopId = shop
+  qrPay.amountFen = amountFen
+  qrPay.mode = 'link'
+  qrPay.qrDataUrl = qrDataUrl
+  qrPay.codeUrl = url
+  qrPay.visible = true
+  return true
+}
 // 扫码支付成功：此时才清购物车并进订单详情
 function onQrPaid() {
   const id = qrPay.outTradeNo
@@ -488,13 +509,24 @@ async function onSubmit() {
     const tradeType = isMobileWeChat() ? 'JSAPI' : 'NATIVE'
     const openid = (store.userInfo && store.userInfo.openid) || ''
     try {
-      const pay = await payOrder({ shopId, outTradeNo, amountFen, description: '跳舞兰AI花店订单', openid, tradeType })
+      let pay
+      try {
+        pay = await payOrder({ shopId, outTradeNo, amountFen, description: '跳舞兰AI花店订单', openid, tradeType })
+      } catch (e) {
+        // PC：Native 支付权限未开通（NO_AUTH）→ 兜底成「手机支付页」二维码。
+        // 用户手机微信扫码打开支付页，用手机内的 JSAPI 付款（JSAPI 权限本来就有）。
+        if (!isMobileWeChat() && /NO_AUTH|未开通|未授权/i.test(String((e && e.message) || ''))) {
+          if (await openLinkQrPay(outTradeNo, shopId, amountFen)) return
+        }
+        throw e
+      }
       if (pay.tradeType === 'NATIVE') {
         // PC：弹二维码由手机扫码。此处**不清购物车、不跳转** —— 结果交给面板回调，
         // 否则用户扫了码没付成、购物车却已空。
         qrPay.outTradeNo = outTradeNo
         qrPay.shopId = shopId
         qrPay.amountFen = amountFen
+        qrPay.mode = 'native'
         qrPay.qrDataUrl = pay.qrDataUrl || ''
         qrPay.codeUrl = pay.code_url || ''
         qrPay.visible = true

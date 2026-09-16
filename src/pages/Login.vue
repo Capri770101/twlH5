@@ -163,6 +163,7 @@ import { useRoute, useRouter } from 'vue-router'
 import QRCode from 'qrcode'
 import NavBar from '@/components/NavBar.vue'
 import { login } from '@/store'
+import store from '@/store'
 import {
   loginByWechat, loginByWechatPc, loginByPhone, loginByPassword, registerAccount, sendSmsCode,
   isWechatEnv, buildWechatAuthUrl, buildWechatPcAuthUrl, fetchAuthConfig,
@@ -454,6 +455,21 @@ onMounted(() => {
   }
   if (q.code && (q.state === 'twd' || q.state === 'twdpc')) {
     wechatLoginByCode(String(q.code), String(q.state))
+    return
+  }
+  // 带 redirect：PC 扫码支付的兜底通道会把二维码指向 /login?redirect=/pay/xxx
+  if (q.redirect) {
+    // 已登录（手机微信里通常授权过）→ 直接去目标页
+    if (store.isLogged && store.token && !String(store.token).startsWith('mock_')) {
+      router.replace(String(q.redirect))
+      return
+    }
+    // 未登录且在微信内 → 自动走网页授权（snsapi_userinfo，有同意框、非静默），
+    // 回跳后由上面的 code 分支完成登录并跳转
+    if (wechatEnv && WX_APPID) {
+      const authUrl = buildWechatAuthUrl(location.href)
+      if (authUrl) { location.href = authUrl; return }
+    }
     return
   }
   // 注：PC 端二维码改为「点微信扫码登录」后才出码（不再自动出码），见 showPcQrView

@@ -9,6 +9,8 @@ const routes = [
   { path: '/checkout', name: 'checkout', component: () => import('@/pages/Checkout.vue') },
   { path: '/orders', name: 'orders', component: () => import('@/pages/Orders.vue'), meta: { requiresAuth: true } },
   { path: '/order/:id', name: 'order-detail', component: () => import('@/pages/OrderDetail.vue'), meta: { requiresAuth: true } },
+  // 手机支付页：PC 扫码支付兜底通道的落地页（二维码指向本页，手机微信内用 JSAPI 付款）
+  { path: '/pay/:outTradeNo', name: 'mobile-pay', component: () => import('@/pages/MobilePay.vue'), meta: { requiresAuth: true, title: '确认支付' } },
   { path: '/detail/:id', name: 'detail', component: () => import('@/pages/Detail.vue') },
   { path: '/shop/:id', name: 'shop-detail', component: () => import('@/pages/ShopDetail.vue') },
   { path: '/shops', name: 'shops', component: () => import('@/pages/Shops.vue') },

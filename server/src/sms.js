@@ -1,7 +1,10 @@
 // server/src/sms.js — 短信验证码（h5_shop.sms_codes）
 // 模式（.env）：
-//   DEBUG_SMS=1 或未配腾讯云密钥 → debug 模式：不真发短信，生成码落库并回显给前端（联调用）
-//   配齐 SMS_TC3_* → tencent 模式：腾讯云 SMS 真发（TC3-HMAC-SHA256 直调，零依赖）
+//   DEBUG_SMS=1 或未配齐任何通道凭证 → debug 模式：不真发短信，生成码落库并回显给前端（联调用）
+//   通道由 SMS_PROVIDER 选择（aliyun | tencent）；留空则自动用「已配齐」的那个
+//     · aliyun  → 阿里云短信 dysmsapi（RPC 风格 V1 签名 HMAC-SHA1）
+//     · tencent → 腾讯云 SMS（TC3-HMAC-SHA256）
+//   两个通道都是零第三方依赖（只用 node:crypto + fetch），可随时互换。
 // 安全约束：60s 重发间隔；5 分钟有效；单号最多错 5 次后作废；debug 模式固定万能码 123456 可过
 import crypto from 'node:crypto'
 import { hq } from './h5db.js'
@@ -27,18 +30,51 @@ export async function ensureSmsTable() {
   ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '短信验证码（debug 先行）'`)
 }
 
+/** 各通道「必须配齐」的变量清单（只看有值，不校验有效性） */
+const ALIYUN_KEYS = ['SMS_ALIYUN_ACCESS_KEY_ID', 'SMS_ALIYUN_ACCESS_KEY_SECRET', 'SMS_ALIYUN_SIGN_NAME', 'SMS_ALIYUN_TEMPLATE_CODE']
+const TENCENT_KEYS = ['SMS_TC3_SECRET_ID', 'SMS_TC3_SECRET_KEY', 'SMS_SDK_APP_ID', 'SMS_SIGN_NAME', 'SMS_TEMPLATE_ID']
+
+/**
+ * 解析当前生效的通道。返回 { provider, ready, want, missing, candidates }
+ * provider: 'aliyun' | 'tencent' | null（null = 没配齐，只能 debug）
+ * missing : 还差哪几个环境变量（供运维一眼定位，不要只报「未配置」）
+ */
+export function smsStatus() {
+  const want = String(process.env.SMS_PROVIDER || '').trim().toLowerCase()
+  const missA = ALIYUN_KEYS.filter((k) => !process.env[k])
+  const missT = TENCENT_KEYS.filter((k) => !process.env[k])
+  const aOk = missA.length === 0
+  const tOk = missT.length === 0
+
+  let provider = null
+  if (want === 'aliyun') provider = aOk ? 'aliyun' : null
+  else if (want === 'tencent') provider = tOk ? 'tencent' : null
+  else provider = aOk ? 'aliyun' : (tOk ? 'tencent' : null) // 未指定 → 自动挑已配齐的
+
+  // 没配齐时报「目标通道」缺的变量：显式指定的优先，否则给默认可用的阿里云
+  const missing = provider ? [] : (want === 'tencent' ? missT : missA)
+  return {
+    provider, ready: !!provider, want: want || 'auto', missing,
+    candidates: {
+      aliyun: { ready: aOk, missing: missA },
+      tencent: { ready: tOk, missing: missT }
+    }
+  }
+}
+
 export function isDebugMode() {
   // ⚠️ 生产环境默认关闭 debug：debug 含「免库万能码 123456 + 回显验证码」，
   //    会让任意手机号绕过短信校验登录/注册 → 账号体系失守。仅显式 ALLOW_DEBUG_SMS=1 才放行。
   if (process.env.NODE_ENV === 'production' && process.env.ALLOW_DEBUG_SMS !== '1') return false
   if (process.env.DEBUG_SMS === '1') return true
-  // 未配齐腾讯云短信密钥 → 视为 debug（避免误以为已接真实短信商）
-  return !(process.env.SMS_TC3_SECRET_ID && process.env.SMS_TC3_SECRET_KEY &&
-    process.env.SMS_SDK_APP_ID && process.env.SMS_SIGN_NAME && process.env.SMS_TEMPLATE_ID)
+  // 未配齐短信通道凭证 → 视为 debug（避免误以为已接真实短信商）
+  return !smsStatus().ready
 }
 
 export function smsMode() {
-  return { mode: isDebugMode() ? 'debug' : 'tencent', debug: isDebugMode() }
+  const st = smsStatus()
+  const debug = isDebugMode()
+  return { mode: debug ? 'debug' : st.provider, provider: st.provider, ready: st.ready, missing: st.missing, debug }
 }
 
 const PHONE_RE = /^1[3-9]\d{9}$/
@@ -83,8 +119,14 @@ export async function sendCode(phone) {
     // debug：不真发短信，把码回给调用方（前端 toast 提示即可）
     return { ok: true, debug: true, code }
   }
-  await sendTencentSms(phone, code)
-  return { ok: true, debug: false }
+  const st = smsStatus()
+  if (!st.ready) {
+    // 生产环境未配短信通道 → 明确告知原因，不要抛含糊的 502
+    throw { status: 503, message: `短信通道未配置（缺少 ${st.missing.join(' / ')}），请联系管理员` }
+  }
+  if (st.provider === 'aliyun') await sendAliyunSms(phone, code)
+  else await sendTencentSms(phone, code)
+  return { ok: true, debug: false, provider: st.provider }
 }
 
 /**
@@ -112,6 +154,62 @@ export async function consumeCode(phone, inputCode) {
   }
   await hq('UPDATE sms_codes SET used = 1 WHERE id = ?', [row.id])
   return { ok: true }
+}
+
+// ---------- 阿里云短信 SMS（dysmsapi，RPC 风格 V1 签名 HMAC-SHA1，零依赖） ----------
+// 需要的 .env：
+//   SMS_ALIYUN_ACCESS_KEY_ID / SMS_ALIYUN_ACCESS_KEY_SECRET  （建议用 RAM 子账号，只授 dysms 权限）
+//   SMS_ALIYUN_SIGN_NAME      签名名称（控制台「签名管理」里已审核通过的那个）
+//   SMS_ALIYUN_TEMPLATE_CODE  模板 CODE，形如 SMS_2958xxxx（控制台「模板管理」）
+//   SMS_ALIYUN_TEMPLATE_PARAM 可选：变量名映射模板，默认 {"code":"{code}","min":"{ttl}"}
+//                             {code}=验证码 {ttl}=有效分钟数；模板只有一个变量就删掉多余的键。
+//                             ⚠️ 键名必须与阿里云模板正文里的 ${xxx} 完全一致，否则会报变量缺失。
+//   SMS_ALIYUN_REGION         可选，默认 cn-hangzhou
+
+/** 阿里云 POP 签名要求的 percentEncode：保留 A-Za-z0-9-_.~，其余全编码（空格→%20 而非 +） */
+function pe(v) {
+  return encodeURIComponent(String(v))
+    .replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase())
+    .replace(/%7E/g, '~')
+}
+
+async function sendAliyunSms(phone, code) {
+  const params = {
+    AccessKeyId: process.env.SMS_ALIYUN_ACCESS_KEY_ID,
+    Action: 'SendSms',
+    Format: 'JSON',
+    PhoneNumbers: String(phone),
+    RegionId: process.env.SMS_ALIYUN_REGION || 'cn-hangzhou',
+    SignName: process.env.SMS_ALIYUN_SIGN_NAME,
+    SignatureMethod: 'HMAC-SHA1',
+    SignatureNonce: crypto.randomUUID(),
+    SignatureVersion: '1.0',
+    TemplateCode: process.env.SMS_ALIYUN_TEMPLATE_CODE,
+    TemplateParam: String(process.env.SMS_ALIYUN_TEMPLATE_PARAM || '{"code":"{code}","min":"{ttl}"}')
+      .replace(/\{code\}/g, String(code))
+      .replace(/\{ttl\}/g, String(TTL_MIN)),
+    Timestamp: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+    Version: '2017-05-25'
+  }
+  // 待签名串：参数按 key 字典序 → key=value 编码后 & 连接
+  const canonical = Object.keys(params).sort()
+    .map((k) => `${pe(k)}=${pe(params[k])}`).join('&')
+  const stringToSign = `POST&${pe('/')}&${pe(canonical)}`
+  const signature = crypto.createHmac('sha1', process.env.SMS_ALIYUN_ACCESS_KEY_SECRET + '&')
+    .update(stringToSign).digest('base64')
+
+  const res = await fetch('https://dysmsapi.aliyuncs.com/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `${canonical}&Signature=${pe(signature)}`
+  })
+  const j = await res.json().catch(() => null)
+  if (!res.ok || !j || j.Code !== 'OK') {
+    // 常见 Code：isv.SMS_SIGNATURE_ILLEGAL(签名不合法) / isv.SMS_TEMPLATE_ILLEGAL(模板不合法)
+    //            isv.BUSINESS_LIMIT_CONTROL(触发流控) / isv.AMOUNT_NOT_ENOUGH(余额不足)
+    const msg = (j && (j.Message || j.Code)) || ('aliyun sms http ' + res.status)
+    throw { status: 502, message: '短信发送失败：' + msg }
+  }
 }
 
 // ---------- 腾讯云 SMS（TC3-HMAC-SHA256 直调，零依赖） ----------
