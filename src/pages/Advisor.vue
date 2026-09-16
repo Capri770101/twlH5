@@ -171,7 +171,10 @@ import NavBar from '@/components/NavBar.vue'
 import FlowerImage from '@/components/FlowerImage.vue'
 import store, { addToCart, saveDiyPlan, yuan } from '@/store'
 import AdvisorCards from '@/components/AdvisorCards.vue'
-import { chatWithAdvisor, streamAdvisorChat, pollAgentTask, ADVISOR_PRESETS, AGENT_CONFIG } from '@/mock/api'
+import {
+  chatWithAdvisor, streamAdvisorChat, pollAgentTask, ADVISOR_PRESETS, AGENT_CONFIG,
+  listAgentConversations, fetchAgentMessages
+} from '@/mock/api'
 import { extractDiyPlan, isDiyScene } from '@/utils/extractDiyPlan'
 import { toast } from '@/utils/toast'
 
@@ -568,9 +571,65 @@ function onSaveDiyPlan(plan) {
 }
 
 
+/**
+ * 跨设备同步：智能体平台按账号（user_id）存会话，登录后把平台上的会话拉回来合并。
+ * 命中规则用 sessionId（= 平台的 conversation id），因此可续聊、不会重复。
+ * 失败只记录日志，不影响本地使用（本地 localStorage 仍是离线兜底）。
+ */
+async function syncFromAgent() {
+  if (!AGENT_CONFIG.ready) return
+  if (!(store.isLogged && store.token)) return
+  try {
+    const list = await listAgentConversations()
+    if (!Array.isArray(list) || !list.length) return
+    const bySession = new Map(conversations.value.map(c => [c.sessionId, c]))
+    let added = 0
+    for (const item of list.slice(0, 20)) {
+      const sid = String((item && item.id) || '')
+      if (!sid) continue
+      let msgs = []
+      try {
+        msgs = await fetchAgentMessages(sid)
+      } catch (e) {
+        continue // 单个会话拉取失败不影响其它
+      }
+      if (!msgs.length) continue
+      const updatedAt = Date.parse((item && item.updated_at) || '') || Date.now()
+      const exist = bySession.get(sid)
+      if (exist) {
+        // 本机已有 → 用平台版本刷新（能拿到在另一台设备上的新回复）
+        exist.title = item.title || exist.title
+        exist.messages = [{ ...GREETING }, ...msgs]
+        exist.updatedAt = Math.max(exist.updatedAt || 0, updatedAt)
+      } else {
+        conversations.value.push({
+          id: 'p_' + sid,
+          title: item.title || '历史对话',
+          messages: [{ ...GREETING }, ...msgs],
+          sessionId: sid,
+          agentMode: 'real',
+          updatedAt
+        })
+        added++
+      }
+    }
+    conversations.value.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+    const cur = conversations.value.find(c => c.id === activeId.value)
+    if (cur) {
+      messages.value = cur.messages
+      sessionId.value = cur.sessionId || ''
+    }
+    saveConversations()
+    if (added) toast(`已同步 ${added} 条历史对话`)
+  } catch (e) {
+    console.warn('[advisor] 智能体会话同步失败（不影响使用）：', e && e.message)
+  }
+}
+
 onMounted(() => {
   loadConversations()
   scrollToBottom()
+  syncFromAgent()
 })
 </script>
 

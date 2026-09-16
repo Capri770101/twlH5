@@ -1014,8 +1014,20 @@ function buildMockAdvisorReply(text, shopId) {
   return { reply, products, sessionId: '', mock: true }
 }
 
-// 外部用户标识：生成本机匿名 ID（持久化），登录后可在上层覆盖
+/**
+ * 智能体平台用的「外部用户标识」——决定平台侧会话与记忆归属。
+ *
+ * ⚠️ 必须绑定**账号**而不是设备：平台按 user_id 存会话，若每台设备各用一个随机 ID，
+ *    手机和电脑会被当成两个人，对话永远不同步（旧实现正是本机随机 h5_anon_xxx 且从不覆盖）。
+ *
+ * 规则：已登录 → `h5_u_<账号id>`（手机/电脑同一账号 → 一致）；未登录 → 本机匿名 ID。
+ */
 function getExternalUid() {
+  try {
+    const t = localToken()
+    const ui = localUser()
+    if (isTokenUsable(t) && ui && ui.id) return 'h5_u_' + ui.id
+  } catch (e) { /* 读不到就退回匿名 */ }
   try {
     let anon = localStorage.getItem('twd_external_uid')
     if (!anon) {
@@ -1043,21 +1055,63 @@ function jwtExp(token) {
 let agentToken = ''
 let agentTokenExp = 0
 let agentUserId = ''
+let agentTokenUid = '' // 该 token 对应哪个 external_user_id（身份变了必须重新签发）
 
 // 1) 用平台 Key 换 Bearer token（带内存+过期缓存）
 async function ensureAgentToken() {
-  if (agentToken && Date.now() < agentTokenExp - 60000) return agentToken
+  const ext = getExternalUid()
+  // 身份变化（例如刚从匿名转为登录）→ 旧 token 属于另一个用户，必须重签，
+  // 否则登录后仍以匿名身份对话，history 挂不到账号上。
+  if (agentToken && agentTokenUid === ext && Date.now() < agentTokenExp - 60000) return agentToken
   const res = await fetch(AGENT_CONFIG.apiBase + '/auth/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...agentKeyHeader() },
-    body: JSON.stringify({ external_user_id: getExternalUid() })
+    body: JSON.stringify({ external_user_id: ext })
   })
   if (!res.ok) throw new Error('agent token ' + res.status)
   const d = await res.json()
   agentToken = d.access_token
-  agentUserId = d.user_id || agentUserId
+  agentUserId = d.user_id || ''
+  agentTokenUid = ext
   agentTokenExp = jwtExp(agentToken) || Date.now() + 29 * 24 * 3600 * 1000
   return agentToken
+}
+
+// ===== 会话历史（跨设备同步用；智能体平台按 user_id 存会话）=====
+
+/** 当前账号在智能体平台的会话列表（新→旧） */
+export async function listAgentConversations() {
+  if (!AGENT_CONFIG.ready) return []
+  const tok = await ensureAgentToken()
+  if (!agentUserId) return []
+  const res = await fetch(AGENT_CONFIG.apiBase + '/conversations?user_id=' + encodeURIComponent(agentUserId), {
+    headers: { Accept: 'application/json', Authorization: `Bearer ${tok}`, ...agentKeyHeader() }
+  })
+  if (!res.ok) throw new Error('agent conversations ' + res.status)
+  const d = await res.json()
+  return Array.isArray(d) ? d : ((d && d.items) || [])
+}
+
+/** 某会话的历史消息 → 前端消息形状（平台只存 role/content/ui） */
+export async function fetchAgentMessages(conversationId, limit = 100) {
+  if (!AGENT_CONFIG.ready || !conversationId) return []
+  const tok = await ensureAgentToken()
+  const url = AGENT_CONFIG.apiBase + '/conversations/' + encodeURIComponent(conversationId) +
+    '/messages?user_id=' + encodeURIComponent(agentUserId) + '&limit=' + limit
+  const res = await fetch(url, {
+    headers: { Accept: 'application/json', Authorization: `Bearer ${tok}`, ...agentKeyHeader() }
+  })
+  if (!res.ok) throw new Error('agent messages ' + res.status)
+  const d = await res.json()
+  const arr = Array.isArray(d) ? d : ((d && d.items) || [])
+  return arr
+    .map(m => ({
+      role: m && m.role === 'user' ? 'user' : 'ai',
+      text: String((m && m.content) || ''),
+      cards: [],
+      tools: []
+    }))
+    .filter(m => m.text)
 }
 
 // 从方案对象里解析价格（兼容 元/分 多字段）
