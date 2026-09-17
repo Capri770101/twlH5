@@ -57,6 +57,35 @@
         </div>
       </div>
 
+      <!-- 店铺信息（商品只带 shopId，这里按 id 拉一次店铺详情） -->
+      <div v-if="shopId" class="detail-section shop-section">
+        <div class="section-label">店铺信息</div>
+        <div class="shop-card" @click="goShop">
+          <FlowerImage :src="shopInfo && shopInfo.avatar" :emoji="'🏪'" class="shop-logo" />
+          <div class="shop-main">
+            <div class="shop-title-row">
+              <span class="shop-name text-ellipsis">{{ shopName || '查看店铺' }}</span>
+              <span v-if="shopRatingText" class="shop-rating">{{ shopRatingText }}</span>
+            </div>
+
+            <div v-if="shopTags.length" class="shop-tag-row">
+              <span v-for="t in shopTags" :key="t">{{ t }}</span>
+            </div>
+
+            <div v-if="shopDeliveryText" class="shop-meta">{{ shopDeliveryText }}</div>
+            <div v-if="shopInfo && shopInfo.businessHours" class="shop-meta">营业 {{ shopInfo.businessHours }}</div>
+
+            <div v-if="shopInfo && shopInfo.address" class="shop-addr">
+              <i class="location-pin shop-pin"></i>
+              <span class="text-ellipsis">{{ shopInfo.address }}</span>
+            </div>
+
+            <div v-if="shopLoading && !shopInfo" class="shop-meta">店铺信息加载中…</div>
+          </div>
+          <span class="shop-enter">进店 ›</span>
+        </div>
+      </div>
+
       <!-- 规格选择 -->
       <div v-if="specs.length > 1" class="detail-section detail-spec-section">
         <div class="section-label">
@@ -180,7 +209,7 @@
       <!-- 底部操作栏 -->
       <div class="detail-footer">
         <div class="detail-footer-left">
-          <button class="footer-action" @click="router.push({ name: 'home' })">
+          <button class="footer-action" @click="goShop">
             <img class="footer-icon footer-icon-nav" src="/images/tab-home.png" alt="店铺" />
             <span class="footer-action-text">店铺</span>
           </button>
@@ -208,7 +237,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getFlowerDetail, getProductReviews } from '@/mock/api'
+import { getFlowerDetail, getProductReviews, getShopDetail } from '@/mock/api'
 import { addToCart, cartCount, money, toggleFavorite, isFavorite } from '@/store'
 import { deriveSpecs, defaultSpec } from '@/utils/specs'
 import NavBar from '@/components/NavBar.vue'
@@ -331,14 +360,67 @@ const reviewAvg = computed(() => {
   return (sum / reviews.value.length).toFixed(1)
 })
 
+// ===== 店铺信息 =====
+// 商品数据只带 shopId（aistore 下发的 shopName 常为空字符串），
+// 所以想展示店铺名/头像/评分/地址这些，必须按 shopId 再拉一次店铺详情。
+const shopInfo = ref(null)
+const shopLoading = ref(false)
+const shopId = computed(() => String((flower.value && flower.value.shopId) || '').trim())
+const shopName = computed(() => {
+  const s = shopInfo.value
+  return (s && s.name) || (flower.value && flower.value.shopName) || ''
+})
+const shopTags = computed(() => {
+  const t = shopInfo.value && shopInfo.value.tags
+  return Array.isArray(t) ? t.slice(0, 3) : []
+})
+const shopRatingText = computed(() => {
+  const s = shopInfo.value
+  const r = Number((s && s.rating) || 0)
+  if (!(r > 0)) return ''
+  const n = Number((s && s.ratingCount) || 0)
+  return n > 0 ? `${r.toFixed(1)} 分 · ${n} 条评价` : `${r.toFixed(1)} 分`
+})
+// 配送时间 / 配送费 / 起送价（后端这两个价格字段是「分」）
+const shopDeliveryText = computed(() => {
+  const s = shopInfo.value
+  if (!s) return ''
+  const parts = []
+  if (s.deliveryTime) parts.push(`${s.deliveryTime}送达`)
+  if (s.deliveryFee != null) parts.push(s.deliveryFee > 0 ? `配送 ¥${money(s.deliveryFee)}` : '免配送费')
+  if (Number(s.minOrderPrice) > 0) parts.push(`起送 ¥${money(s.minOrderPrice)}`)
+  return parts.join(' · ')
+})
+
+async function loadShop(id) {
+  if (!id) return
+  shopLoading.value = true
+  try {
+    const d = await getShopDetail(id)
+    if (d && d.shop) shopInfo.value = d.shop
+  } catch (e) {
+    // 店铺信息拉取失败不影响商品本身，只是少展示一块信息
+    console.warn('[detail] 店铺信息加载失败：', e && e.message)
+  } finally {
+    shopLoading.value = false
+  }
+}
+
+function goShop() {
+  if (!shopId.value) { toast('店铺信息缺失'); return }
+  router.push({ name: 'shop-detail', params: { id: shopId.value } })
+}
+
 async function loadDetail() {
   loading.value = true
   loadError.value = ''
   flower.value = null
+  shopInfo.value = null
   try {
     const data = await getFlowerDetail(route.params.id)
     if (!data) { loadError.value = '商品不存在或已下架'; return }
     flower.value = data
+    loadShop(data.shopId)
     getProductReviews(route.params.id).then(list => { reviews.value = list || [] }).catch(() => {})
   } catch (e) {
     loadError.value = (e && e.message) || '商品信息加载失败'
@@ -468,6 +550,109 @@ onMounted(() => {
 }
 .detail-scene-section {
   background: #fffdfa;
+}
+
+/* ===== 店铺信息 ===== */
+.shop-section {
+  background: #fff;
+}
+.shop-card {
+  display: flex;
+  align-items: center;
+  gap: rpx(18);
+  width: 100%;
+  text-align: left;
+  padding: rpx(20);
+  border: rpx(1) solid var(--border-light);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+.shop-card:active {
+  background: #f2efe9;
+}
+.shop-logo {
+  flex: 0 0 rpx(112);
+  width: rpx(112);
+  height: rpx(112);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: #fff;
+  border: rpx(1) solid var(--border-light);
+  :deep(img) { width: 100%; height: 100%; object-fit: cover; }
+}
+.shop-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: rpx(6);
+}
+.shop-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: rpx(12);
+  min-width: 0;
+}
+.shop-name {
+  flex: 1;
+  min-width: 0;
+  font-size: rpx(28);
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.shop-rating {
+  flex: none;
+  font-size: rpx(22);
+  font-weight: 600;
+  color: #b8860b;
+}
+.shop-tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: rpx(8);
+}
+.shop-tag-row span {
+  padding: rpx(4) rpx(12);
+  border-radius: rpx(999);
+  background: #fff4dc;
+  color: #8b5b12;
+  font-size: rpx(20);
+  font-weight: 600;
+}
+.shop-meta {
+  font-size: rpx(22);
+  color: var(--text-secondary);
+}
+.shop-addr {
+  display: flex;
+  align-items: center;
+  gap: rpx(6);
+  min-width: 0;
+  font-size: rpx(22);
+  color: var(--text-secondary);
+}
+.shop-addr .text-ellipsis {
+  min-width: 0;
+}
+/* 复用 base.scss 的线稿 pin，缩小到与 22rpx 文字同级 */
+.shop-pin {
+  flex: none;
+  transform: scale(0.6) translateY(rpx(3));
+  transform-origin: left center;
+  margin-right: rpx(-14);
+}
+.shop-enter {
+  flex: none;
+  align-self: center;
+  padding: rpx(10) rpx(18);
+  border-radius: rpx(999);
+  background: var(--primary-light);
+  color: var(--primary);
+  font-size: rpx(22);
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 /* ===== 规格 ===== */
