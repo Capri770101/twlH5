@@ -49,7 +49,11 @@ export function mergeAgentMessages(localMsgs, remoteMsgs) {
  * 现象就是「刷新后卡片全没了」。宁可丢大字段，也要保住文本与卡片骨架。
  */
 export function slimValue(v, depth = 0) {
-  if (depth > 3) return null
+  // 🔴 深度上限必须放得下 DIY 方案的层级：
+  //   card.data(0) → plans(1) → plan(2) → design(3) → main_flowers(4) → {name,flower_language}(5) → 数组元素(6)
+  //   原来写 `depth > 3` 会把 design 整个变成 null —— 现象是「刷新后 DIY 方案又变回不具体」，
+  //   本次修复会被 silently 吃掉。这里放到 8 留出余量；靠字符串长度与数组截断控量即可。
+  if (depth > 8) return null
   if (typeof v === 'string') return v.length > 1500 ? '' : v
   if (Array.isArray(v)) return v.slice(0, 12).map(x => slimValue(x, depth + 1))
   if (v && typeof v === 'object') {
