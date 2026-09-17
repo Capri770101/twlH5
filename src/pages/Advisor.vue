@@ -32,12 +32,12 @@
          用途：把「消息 + 卡片」的真实数据结构直接摊在页面上，
          排查「卡片拿不到效果图」这类问题时不必靠猜。 -->
     <div v-if="diagOn" class="diag">
-      <div class="diag-h">DIAG · 消息 {{ messages.length }} 条 · 版本 ca78911+</div>
+      <div class="diag-h">DIAG · 消息 {{ messages.length }} 条 · 版本 0062f37+</div>
       <div v-for="(m, i) in messages" :key="'dg' + i" class="diag-m">
         <div class="diag-r">
           <b>#{{ i }} {{ m.role }}</b>
           <span>text:{{ (m.text || '').length }}字</span>
-          <span>img:{{ m.image ? '有' : '无' }}</span>
+          <span>img:{{ m.image ? ('有 ' + shortUrl(m.image)) : '无' }}</span>
           <span>st:{{ m.imageStatus || '-' }}</span>
           <span>poll:{{ m.poll || '-' }}</span>
           <span>cards:{{ (m.cards || []).length }}</span>
@@ -925,6 +925,8 @@ async function syncFromAgent() {
 const diagOn = ref(false)
 const keysOf = (o) => Object.keys(o || {}).join(',')
 const diyCount = (arr) => (Array.isArray(arr) ? arr.filter(p => p && p.diy).length : 0)
+/** 诊断面板用：只显示地址尾部，便于发现 /agent/agent/... 这类拼接错误 */
+const shortUrl = (u) => { const t = String(u || ''); return t.length > 44 ? ('…' + t.slice(-44)) : t }
 
 onMounted(() => {
   diagOn.value = /[?&]diag=1/.test(location.search)

@@ -147,6 +147,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { AGENT_CONFIG } from '@/mock/api'
+import { normalizeAgentAssetUrl } from '@/utils/agentAsset'
 import { normalizeDiyPlan, hexOfColor } from '@/utils/diyPlan'
 
 const props = defineProps({
@@ -163,14 +164,14 @@ const props = defineProps({
 defineEmits(['save', 'send'])
 
 const AISTORE_BASE = 'https://aistore.xiangbinmeigui.com'
+/** 效果图统一走 agentAsset 的归一化（幂等 + 能折叠历史 /agent/agent 双重前缀）。
+ *  aistore 的 /uploads 是另一套宿主，单独处理。 */
 function absImg(u) {
   const s = String(u || '')
   if (!s) return ''
   if (/^https?:/i.test(s)) return s
   if (s.startsWith('/uploads')) return AISTORE_BASE + s
-  // 平台生成的效果图是相对路径 /generated/xxx.png，必须经 /agent 反代取
-  if (s.startsWith('/generated') || s.startsWith('/tasks')) return AGENT_CONFIG.apiBase + s
-  return s
+  return normalizeAgentAssetUrl(s, AGENT_CONFIG.apiBase || '')
 }
 
 /** 解析全部收敛在 utils/diyPlan.js（纯函数，可单测） */

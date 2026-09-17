@@ -1,3 +1,4 @@
+import { normalizeAgentAssetUrl as normalizeAgentAssetUrlPure } from '@/utils/agentAsset'
 import mockData from './data'
 import { getReviewByOrder, getReviewsByProduct } from '@/store'
 
@@ -1343,11 +1344,10 @@ export async function streamAdvisorChat({ message, shopId = 'default', sessionId
  * 平台返回的资源地址可能是**相对路径**（实测效果图是 `/generated/xxx.png`）。
  * 直接塞进 <img src> 会打到前端自己的域名上 → 图裂。统一补上 apiBase（/agent）走反代。
  */
+// 实现已抽到 src/utils/agentAsset.js（纯函数、可单测）；这里只绑定当前 apiBase。
+// 🔴 该函数**必须幂等**：调用方常会重复归一化，不幂等会拼出 /agent/agent/... → 404。
 export function normalizeAgentAssetUrl(u) {
-  const s = String(u || '').trim()
-  if (!s) return ''
-  if (/^https?:\/\//i.test(s) || s.startsWith('data:')) return s
-  return AGENT_CONFIG.apiBase + (s.startsWith('/') ? s : '/' + s)
+  return normalizeAgentAssetUrlPure(u, AGENT_CONFIG.apiBase || '')
 }
 
 /**
