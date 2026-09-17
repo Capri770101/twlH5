@@ -144,7 +144,13 @@ export function extractDiyPlan(text) {
   if (careTips.length > 120) careTips = careTips.slice(0, 120)
 
   let greeting = pickSentence(t, ['贺卡', '祝福语', '留言', '卡片文案'])
-  greeting = greeting.replace(/^[^：:]{0,10}[：:]\s*/, '').trim()
+  // 去掉列表序号（「4. 」「3、」「2)」）—— AI 常把贺卡建议写成编号列表的第 N 条
+  greeting = greeting.replace(/^\s*\d+\s*[.、)）]\s*/, '')
+  // 优先取引号内的原文：AI 一般把真正的文案放在「」/“” 里，
+  // 否则会把「贺卡文案我也写好了：」这类引导语一起带进来（用户截图里正是这样）
+  const quoted = greeting.match(/[「『“"]([^」』”"]{4,80})[」』”"]/)
+  if (quoted) greeting = quoted[1].trim()
+  else greeting = greeting.replace(/^[^：:]{0,24}[：:]\s*/, '').trim()
   if (greeting.length > 100) greeting = greeting.slice(0, 100)
 
   let skillLevel = ''

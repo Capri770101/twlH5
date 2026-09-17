@@ -2,35 +2,49 @@
   <div class="adv-cards">
     <!-- ===== 方案卡 plan_card ===== -->
     <template v-if="ui === 'plan_card'">
-      <div class="sect-label">
-        <span>为你挑选的花束</span>
-        <span v-if="plans.length" class="tally">{{ plans.length }} 款</span>
-      </div>
-      <div class="prods">
-        <article
-          v-for="p in plans"
-          :key="p.id"
-          class="prod"
-          @click="$emit('go-detail', p)"
-        >
-          <div class="prod-img">
-            <FlowerImage :src="p.image" :emoji="'💐'" class="prod-img-inner" />
-            <span v-if="p.stock <= 0" class="prod-tag out">暂缺</span>
-          </div>
-          <div class="prod-body">
-            <div class="prod-name">{{ p.name }}</div>
-            <div v-if="p.desc" class="prod-sub">{{ p.desc }}</div>
-            <div v-if="p.merchant" class="prod-meta">{{ p.merchant }}<span v-if="p.stock > 0" class="stock"> · 现货</span></div>
-            <div class="price-bar">
-              <span class="price-main">¥{{ yuan(p.priceText) }}</span>
+      <!-- 现成商品 -->
+      <template v-if="plans.length">
+        <div class="sect-label">
+          <span>为你挑选的花束</span>
+          <span class="tally">{{ plans.length }} 款</span>
+        </div>
+        <div class="prods">
+          <article
+            v-for="p in plans"
+            :key="p.id"
+            class="prod"
+            @click="$emit('go-detail', p)"
+          >
+            <div class="prod-img">
+              <FlowerImage :src="p.image" :emoji="'💐'" class="prod-img-inner" />
+              <span v-if="p.stock <= 0" class="prod-tag out">暂缺</span>
             </div>
-            <div class="prod-acts" @click.stop>
-              <button class="act ghost" @click="$emit('buy', { item: p, mode: 'cart' })">加入购物车</button>
-              <button class="act" @click="$emit('buy', { item: p, mode: 'now' })">立即结算</button>
+            <div class="prod-body">
+              <div class="prod-name">{{ p.name }}</div>
+              <div v-if="p.desc" class="prod-sub">{{ p.desc }}</div>
+              <div v-if="p.merchant" class="prod-meta">{{ p.merchant }}<span v-if="p.stock > 0" class="stock"> · 现货</span></div>
+              <div class="price-bar">
+                <!-- 价格缺失时不要拼 ¥（否则显示成「¥到店咨询」） -->
+                <span class="price-main">{{ p.price ? '¥' + yuan(p.priceText) : '到店咨询' }}</span>
+              </div>
+              <div class="prod-acts" @click.stop>
+                <button class="act ghost" @click="$emit('buy', { item: p, mode: 'cart' })">加入购物车</button>
+                <button class="act" @click="$emit('buy', { item: p, mode: 'now' })">立即结算</button>
+              </div>
             </div>
-          </div>
-        </article>
-      </div>
+          </article>
+        </div>
+      </template>
+
+      <!-- DIY 定制方案（同一张 plan_card 里 diy:true 的项，走专用卡而非商品卡） -->
+      <AdvisorDiyCard
+        v-for="(d, di) in diyPlans"
+        :key="'diy-' + di"
+        :plan="d"
+        :card-top="P"
+        @save="$emit('save-diy-plan', $event)"
+        @send="$emit('send', $event)"
+      />
     </template>
 
     <!-- ===== 订单确认卡 order_card ===== -->
@@ -145,81 +159,15 @@
     </template>
 
     <!-- ===== DIY 方案卡 diy_plan_card ===== -->
+    <!-- 平台现已通过 plan_card 下发 DIY 数据；此分支用于「平台未发卡、由前端从正文兜底提取」的情况。
+         两种结构的字段适配都在 AdvisorDiyCard 内完成。 -->
     <template v-else-if="ui === 'diy_plan_card'">
-      <div class="card">
-        <!-- 封面 -->
-        <div class="diy-cover">
-          <FlowerImage v-if="diyPlan.image" :src="diyPlan.image" :emoji="'💐'" class="diy-cover-inner" />
-          <div v-else class="diy-cover-ph">
-            <span class="ph-emoji">💐</span>
-            <span class="ph-text">效果图生成中</span>
-          </div>
-        </div>
-
-        <!-- 报头 -->
-        <div class="card-head">
-          <div class="card-kicker">Atelier Plan</div>
-          <div class="card-title">{{ diyPlan.name || 'DIY 方案' }}</div>
-          <div v-if="diyPlan.desc" class="card-sub">{{ diyPlan.desc }}</div>
-          <div class="chips" v-if="diyPlan.skillLevel || diyPlan.suitableFor">
-            <span v-if="diyPlan.skillLevel" class="chip">{{ diyPlan.skillLevel }}</span>
-            <span v-if="diyPlan.suitableFor" class="chip brass">{{ diyPlan.suitableFor }}</span>
-          </div>
-        </div>
-
-        <div class="card-body">
-          <!-- 花材清单 -->
-          <div v-if="diyPlan.materials.length" class="sect">
-            <div class="sect-label"><span>花材清单</span></div>
-            <div class="fl">
-              <div v-for="(m, i) in diyPlan.materials" :key="i" class="fl-row">
-                <span class="fl-name">{{ m.name }}</span>
-                <span class="fl-qty">{{ m.qty > 0 ? '×' + m.qty + (m.unit || '支') : '适量' }}</span>
-                <span v-if="m.subText" class="fl-sec">{{ m.subText }}</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- 预算明细 -->
-          <div v-if="diyPlan.budget.length" class="sect">
-            <div class="sect-label"><span>预算明细</span></div>
-            <div class="rows boxed">
-              <div v-for="(b, i) in diyPlan.budget" :key="i" class="row">
-                <span class="row-name">{{ b.label }}</span>
-                <span class="row-num">¥{{ b.amountText }}</span>
-              </div>
-              <div v-if="diyPlan.budgetTotalText" class="row total">
-                <span class="row-name">合计</span>
-                <span class="row-num">¥{{ diyPlan.budgetTotalText }}</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- 养护贴士 -->
-          <div v-if="diyPlan.careTips" class="sect">
-            <div class="sect-label"><span>养护贴士</span></div>
-            <div class="plain">{{ diyPlan.careTips }}</div>
-          </div>
-
-          <!-- 贺卡建议 -->
-          <div v-if="diyPlan.greeting" class="sect">
-            <div class="sect-label"><span>贺卡建议</span></div>
-            <div class="quote">{{ diyPlan.greeting }}</div>
-            <button class="copy-btn" @click="copyText(diyPlan.greeting, '贺卡文案已复制')">
-              {{ copyHint || '一键复制' }}
-            </button>
-          </div>
-
-          <!-- 价格 + 动作 -->
-          <div class="price-bar">
-            <span class="price-main">¥{{ yuan(diyPlan.priceText) }}<small>整束预估</small></span>
-          </div>
-          <div class="card-actions">
-            <button class="act ghost" @click="$emit('save-diy-plan', diyPlan)">保存到我的方案</button>
-            <button class="act" @click="$emit('buy', { item: diyPlan.buyItem, mode: 'cart' })">加入购物车</button>
-          </div>
-        </div>
-      </div>
+      <AdvisorDiyCard
+        :plan="diyPlan"
+        :card-top="P"
+        @save="$emit('save-diy-plan', $event)"
+        @send="$emit('send', $event)"
+      />
     </template>
 
     <!-- ===== 对话选项 dialog_options ===== -->
@@ -239,6 +187,7 @@
 <script setup>
 import { computed, ref, onMounted } from 'vue'
 import FlowerImage from '@/components/FlowerImage.vue'
+import AdvisorDiyCard from '@/components/AdvisorDiyCard.vue'
 import { pollAgentTask, AGENT_CONFIG } from '@/mock/api'
 import { yuan } from '@/store'
 
@@ -272,22 +221,34 @@ const P = computed(() => {
 
 const ui = computed(() => (props.card && props.card.ui) || 'text')
 
+/** 平台 plan_card.plans 里混了两类，必须按 `diy` 标志分流：
+ *  · 现成商品：id = f_xxx、有 image/images、price 为数字、带 shop_id
+ *  · DIY 方案：diy = true、plan_id = DIY_xxx、**没有 image**（效果图要靠 task_id 轮询生成）、
+ *             价格是 estimated_price（字符串，如「约 200 元（轻送礼档）」）/ budget_breakdown.total_estimate
+ * 🔴 以前一律当商品渲染 → DIY 那条既没图、价格显示成「¥到店咨询」，
+ *    点结算还找不到商品（用户反馈「推荐的商品不存在且没有图片」）。
+ */
+const rawPlans = computed(() => (Array.isArray(P.value.plans) ? P.value.plans : []))
+
 const plans = computed(() =>
-  (P.value.plans || []).map(p => {
+  rawPlans.value.filter(p => !p.diy).map(p => {
     const price = Number(p.price != null ? p.price : p.price_yuan != null ? p.price_yuan : 0)
     return {
       id: String(p.id != null ? p.id : p.plan_id != null ? p.plan_id : p.name || Math.random()),
       name: p.name || '推荐花束',
       price,
-      priceText: price ? price.toFixed(2) : '到店咨询',
-      image: absImg(p.image || p.image_url || p.effect_image_url || ''),
-      desc: p.desc || p.description || '',
+      priceText: price ? price.toFixed(2) : '',
+      image: absImg(p.image || p.image_url || (Array.isArray(p.images) && p.images[0]) || ''),
+      desc: p.desc || p.description || p.subtitle || '',
       stock: Number(p.stock != null ? p.stock : 99),
       shopId: p.shop_id || p.shopId || 'default',
       merchant: p.merchant_name || p.merchant || ''
     }
   })
 )
+
+/** DIY 方案（platform 结构原样交给 AdvisorDiyCard 解析） */
+const diyPlans = computed(() => rawPlans.value.filter(p => p.diy))
 
 const order = computed(() => {
   const o = P.value
@@ -339,84 +300,11 @@ const greet = computed(() => P.value)
 const greetImg = computed(() => absImg(P.value.image_url || P.value.image || ''))
 
 // ===== DIY 方案卡 diy_plan_card =====
-const diyPlan = computed(() => {
-  const d = P.value || {}
-  const priceRaw = Number(d.price != null ? d.price : d.price_yuan != null ? d.price_yuan : 0)
-  // 容错：若价格 > 10000 猜成"分"，自动 /100
-  const price = priceRaw > 10000 ? priceRaw / 100 : priceRaw
-  const materials = (d.materials || []).map(m => {
-    const qty = Number(m.qty != null ? m.qty : m.quantity || 0)
-    const sub = Number(m.price_yuan != null ? m.price_yuan : m.unit_price || 0)
-    const subText = sub ? '¥' + sub.toFixed(2) + (qty ? ' × ' + qty + (m.unit || '支') : '') : ''
-    return {
-      name: m.name || '花材',
-      qty: qty || 0,
-      unit: m.unit || '支',
-      subText,
-      _sub: sub,
-      _qty: qty
-    }
-  })
-  const budget = (d.budget || []).map(b => ({
-    label: b.label || '其他',
-    amount: Number(b.amount_yuan != null ? b.amount_yuan : b.amount != null ? b.amount : 0),
-    amountText: (Number(b.amount_yuan != null ? b.amount_yuan : b.amount != null ? b.amount : 0)).toFixed(2)
-  }))
-  const budgetTotal = budget.reduce((s, b) => s + b.amount, 0)
-  const id = String(d.plan_id != null ? d.plan_id : d.id != null ? d.id : ('diy_' + Date.now()))
-  const name = d.name || 'DIY 方案'
-  const skillLevel = d.skill_level || ''
-  const suitableFor = d.suitable_for || ''
-  const careTips = d.care_tips || ''
-  const greeting = d.greeting_suggestion || d.greeting || ''
-  // 构造加购用的 buyItem（兼容现有 onCardBuy）
-  const buyItem = {
-    id: 'diy_' + id,
-    name,
-    price,
-    priceText: price ? price.toFixed(2) : '到店咨询',
-    image: absImg(d.effect_image_url || d.image_url || d.image || ''),
-    desc: d.desc || '',
-    stock: 99,
-    shopId: d.shop_id || 'default',
-    merchant: d.merchant_name || d.merchant || 'AI 定制',
-    _isDiy: true,
-    _diyPayload: d
-  }
-  return {
-    id,
-    name,
-    desc: d.desc || '',
-    price,
-    priceText: price ? price.toFixed(2) : '到店咨询',
-    image: absImg(d.effect_image_url || d.image_url || d.image || ''),
-    skillLevel,
-    suitableFor,
-    materials,
-    budget,
-    budgetTotalText: budgetTotal ? budgetTotal.toFixed(2) : '',
-    careTips,
-    greeting,
-    buyItem
-  }
-})
+// 原始 data 直接交给 AdvisorDiyCard 解析：字段适配（平台的 design.* / budget_breakdown
+// 与前端兜底结构的兼容）全部收敛在那一个组件里，避免两处各写一套解析。
+const diyPlan = computed(() => P.value || {})
 
-function copyText(t, hint) {
-  const text = String(t || '')
-  if (!text) return
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(text).then(() => showHint(hint || '已复制'))
-  } else {
-    showHint('已复制：' + text.slice(0, 20))
-  }
-}
-const copyHint = ref('')
-let copyTimer = null
-function showHint(t) {
-  copyHint.value = t
-  clearTimeout(copyTimer)
-  copyTimer = setTimeout(() => { copyHint.value = '' }, 1500)
-}
+// 复制 / 提示 逻辑已随 DIY 卡迁到 AdvisorDiyCard.vue（各自 scoped，互不干扰）
 
 // 生图任务：有结果直接展示，否则轮询 /tasks/{id}
 const taskImage = ref(absImg(P.value.result_url || P.value.image_url || ''))

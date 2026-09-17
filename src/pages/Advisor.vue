@@ -129,8 +129,10 @@
               @go-detail="onGoDetail"
             />
 
-            <!-- 效果图（轮询回填；生成中显示 3:4 骨架 + 计时，出图后淡入）-->
-            <figure v-if="m.image" class="frame">
+            <!-- 效果图（轮询回填；生成中显示 3:4 骨架 + 计时，出图后淡入）
+                 ⚠️ 消息里已有 DIY 方案卡时不再单独渲染：图会填进该卡的封面，
+                    否则同一张效果图会出现两次（卡片内一次、消息末尾一次）。 -->
+            <figure v-if="m.image && !hasDiyCard(m)" class="frame">
               <img
                 v-if="!m.imageBroken"
                 class="frame-img"
@@ -145,7 +147,7 @@
               </div>
               <figcaption class="frame-cap"><span>效果图</span><b>AI 生成</b></figcaption>
             </figure>
-            <figure v-else-if="m.imageStatus === 'processing'" class="frame">
+            <figure v-else-if="m.imageStatus === 'processing' && !hasDiyCard(m)" class="frame">
               <div class="frame-pad">
                 <div class="shimmer"></div>
                 <p class="plain frame-tip">
@@ -154,7 +156,7 @@
               </div>
               <figcaption class="frame-cap"><span>效果图</span><b>生成中</b></figcaption>
             </figure>
-            <p v-else-if="m.imageError" class="frame-error">{{ m.imageError }}</p>
+            <p v-else-if="m.imageError && !hasDiyCard(m)" class="frame-error">{{ m.imageError }}</p>
 
             <!-- DIY 方案卡（真实智能体 plan_card / tool_calls） -->
             <div v-if="m.plans && m.plans.length" class="prods">
@@ -668,7 +670,9 @@ function buyPlan(plan) {
 // 从流完的文本里启发式提取方案并合成 diy_plan_card（平台发了卡则跳过，不重复）
 function attachDiyPlan(msg) {
   if (!msg || !msg.text) return
-  if ((msg.cards || []).some(c => c.ui === 'diy_plan_card')) return
+  // 🔴 平台已下发 DIY 数据（plan_card 里含 diy:true）时**不要再从正文提取**：
+  //    否则同一个方案会被渲染两次（截图里正是重复的），且文本猜出来的版本细节远少于平台结构化数据。
+  if (hasDiyCard(msg)) return
   if (!isDiyScene(msg.text, msg.tools)) return
   let plan = null
   try { plan = extractDiyPlan(msg.text) } catch (e) { plan = null }
@@ -702,13 +706,43 @@ function stopThinking() {
   if (thinkTimer) { clearInterval(thinkTimer); thinkTimer = null }
 }
 
+/** 消息里是否已有 DIY 方案卡（平台 plan_card 里的 diy 项，或前端兜底合成的 diy_plan_card） */
+function hasDiyCard(msg) {
+  return (Array.isArray(msg && msg.cards) ? msg.cards : []).some(c =>
+    c && (c.ui === 'diy_plan_card' ||
+      (c.ui === 'plan_card' && Array.isArray(c.data && c.data.plans) &&
+        c.data.plans.some(p => p && p.diy))))
+}
+
+/**
+ * 效果图回填：消息级的图要**同时**写进 DIY 卡封面。
+ * 否则卡片一直停在「效果图生成中」，真图却另外渲染在消息末尾 ——
+ * 用户看到的就是「DIY 方案的图片没放在对应位置」。
+ * 平台把生图任务挂在 plan_card 顶层、方案本体在 plans[i]，所以两处都要写。
+ */
+function injectImageToCards(msg, img) {
+  if (!msg || !img) return
+  for (const c of (msg.cards || [])) {
+    if (!c || !c.data) continue
+    if (c.ui === 'diy_plan_card') c.data.effect_image_url = img
+    if (c.ui === 'image_task') c.data.result_url = img
+    if (c.ui === 'plan_card' && Array.isArray(c.data.plans)) {
+      for (const p of c.data.plans) if (p && p.diy) p.effect_image_url = img
+    }
+  }
+}
+
 function startImagePoll(msg, data) {
   if (!msg || msg.image) return
   // 没有 poll 就从卡片/文本里取；已有 poll（刷新后从本地恢复）则直接续查
   if (!msg.poll) {
     const d = data || {}
     // result_url 可能是相对路径（/generated/xxx.png），必须归一化，否则 img 会打到前端域名上
-    if (d.result_url) { msg.image = normalizeAgentAssetUrl(d.result_url); return }
+    if (d.result_url) {
+      msg.image = normalizeAgentAssetUrl(d.result_url)
+      injectImageToCards(msg, msg.image)
+      return
+    }
     const taskId = String(d.task_id || '').trim()
     const poll = String(d.poll || '').trim() || (taskId ? ('/tasks/' + taskId) : '')
     if (!poll) return
@@ -722,7 +756,12 @@ function startImagePoll(msg, data) {
   msg.imageElapsed = 0
   const clock = setInterval(() => { msg.imageElapsed = Math.round((Date.now() - t0) / 1000) }, 1000)
   Promise.resolve(pollAgentTask(msg.poll, {
-    onImage: img => { msg.image = img; msg.imageStatus = 'done' },
+    onImage: img => {
+      const u = normalizeAgentAssetUrl(img)
+      msg.image = u
+      msg.imageStatus = 'done'
+      injectImageToCards(msg, u)
+    },
     onStatus: (st, err) => {
       msg.imageStatus = st
       if (st === 'failed') msg.imageError = err || '效果图生成失败'
