@@ -14,7 +14,8 @@
       <div v-else class="diy-cover-ph">
         <div v-if="pending && !imgBroken" class="shimmer"></div>
         <span class="ph-emoji" v-if="!pending || imgBroken">💐</span>
-        <span class="ph-text">{{ imgBroken ? '效果图加载失败' : (pending ? '效果图生成中…' : '定制花束') }}</span>
+        <span class="ph-text">{{ imgBroken ? '效果图加载失败' : (pending ? '效果图生成中…' : '尚未生成效果图') }}</span>
+        <span v-if="!pending && !imgBroken" class="ph-hint">点下方「生成效果图」</span>
       </div>
       <span v-if="cover" class="cover-cap">效果图 · AI 生成</span>
     </div>
@@ -124,7 +125,19 @@
         <span class="price-side">参考报价 · 含手工与包装<br />实际以门店确认为准</span>
       </div>
       <div class="card-actions">
-        <button class="act ghost" @click="$emit('send', '这个方案换个配色再给我一版')">换个配色</button>
+        <!-- 🔴 平台**不总是**下发 task_id（实测同一会话里有的回复有、有的只有 plans）→ 没有任务就没有图。
+             官方 demo 的做法是给一个「生成效果图」按钮，由用户显式触发一次对话来出图。 -->
+        <button
+          v-if="!cover"
+          class="act ghost"
+          :disabled="pending"
+          @click="$emit('send', '给「' + d.name + '」这个方案生成一张效果图')"
+        >{{ pending ? '正在生成…' : '生成效果图' }}</button>
+        <button
+          v-else
+          class="act ghost"
+          @click="$emit('send', '这个方案换个配色再给我一版')"
+        >换个配色</button>
         <button class="act" @click="$emit('save', d)">保存到我的方案</button>
       </div>
     </div>
@@ -246,6 +259,12 @@ function showHint(t) {
   gap: rpx(18);
 }
 .ph-emoji { font-size: rpx(64); opacity: 0.5; }
+.ph-hint {
+  font-size: rpx(21);
+  color: var(--brass);
+  letter-spacing: 0.06em;
+  opacity: 0.85;
+}
 .ph-text {
   font-size: rpx(24);
   color: var(--ink-3);
@@ -559,4 +578,5 @@ function showHint(t) {
   border-color: var(--line-2);
 }
 .act.ghost:active { color: var(--moss); border-color: var(--brass-2); }
+.act[disabled] { opacity: 0.55; cursor: default; }
 </style>

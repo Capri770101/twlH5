@@ -32,7 +32,7 @@
          用途：把「消息 + 卡片」的真实数据结构直接摊在页面上，
          排查「卡片拿不到效果图」这类问题时不必靠猜。 -->
     <div v-if="diagOn" class="diag">
-      <div class="diag-h">DIAG · 消息 {{ messages.length }} 条 · 版本 e0d012b+</div>
+      <div class="diag-h">DIAG · 消息 {{ messages.length }} 条 · 版本 ca78911+</div>
       <div v-for="(m, i) in messages" :key="'dg' + i" class="diag-m">
         <div class="diag-r">
           <b>#{{ i }} {{ m.role }}</b>
