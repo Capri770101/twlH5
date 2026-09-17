@@ -42,6 +42,7 @@
         :key="'diy-' + di"
         :plan="d"
         :card-top="P"
+        :image="msgImage"
         @save="$emit('save-diy-plan', $event)"
         @send="$emit('send', $event)"
       />
@@ -165,6 +166,7 @@
       <AdvisorDiyCard
         :plan="diyPlan"
         :card-top="P"
+        :image="msgImage"
         @save="$emit('save-diy-plan', $event)"
         @send="$emit('send', $event)"
       />
@@ -192,7 +194,10 @@ import { pollAgentTask, AGENT_CONFIG } from '@/mock/api'
 import { yuan } from '@/store'
 
 const props = defineProps({
-  card: { type: Object, default: () => ({}) }
+  card: { type: Object, default: () => ({}) },
+  /** 所属消息的效果图 URL（Advisor.vue 轮询得到）—— 直接透给 DIY 卡当封面。
+   *  比「把图写进 card.data」更直接可靠：不依赖注入时序，也不会因落盘截断而丢。 */
+  msgImage: { type: String, default: '' }
 })
 defineEmits(['buy', 'send', 'pay', 'order', 'view-order', 'save-diy-plan', 'go-shop', 'go-detail'])
 

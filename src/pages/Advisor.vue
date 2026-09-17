@@ -119,6 +119,7 @@
               v-for="(c, ci) in (m.cards || [])"
               :key="ci"
               :card="c"
+              :msg-image="m.image || ''"
               @buy="onCardBuy"
               @send="sendOption"
               @pay="onCardPay"
@@ -132,7 +133,7 @@
             <!-- 效果图（轮询回填；生成中显示 3:4 骨架 + 计时，出图后淡入）
                  ⚠️ 消息里已有 DIY 方案卡时不再单独渲染：图会填进该卡的封面，
                     否则同一张效果图会出现两次（卡片内一次、消息末尾一次）。 -->
-            <figure v-if="m.image && !hasDiyCard(m)" class="frame">
+            <figure v-if="m.image && !diyCoverReady(m)" class="frame">
               <img
                 v-if="!m.imageBroken"
                 class="frame-img"
@@ -147,7 +148,7 @@
               </div>
               <figcaption class="frame-cap"><span>效果图</span><b>AI 生成</b></figcaption>
             </figure>
-            <figure v-else-if="m.imageStatus === 'processing' && !hasDiyCard(m)" class="frame">
+            <figure v-else-if="m.imageStatus === 'processing' && !diyCoverReady(m)" class="frame">
               <div class="frame-pad">
                 <div class="shimmer"></div>
                 <p class="plain frame-tip">
@@ -156,7 +157,7 @@
               </div>
               <figcaption class="frame-cap"><span>效果图</span><b>生成中</b></figcaption>
             </figure>
-            <p v-else-if="m.imageError && !hasDiyCard(m)" class="frame-error">{{ m.imageError }}</p>
+            <p v-else-if="m.imageError && !diyCoverReady(m)" class="frame-error">{{ m.imageError }}</p>
 
             <!-- DIY 方案卡（真实智能体 plan_card / tool_calls） -->
             <div v-if="m.plans && m.plans.length" class="prods">
@@ -730,6 +731,28 @@ function injectImageToCards(msg, img) {
       for (const p of c.data.plans) if (p && p.diy) p.effect_image_url = img
     }
   }
+}
+
+/**
+ * 这条消息里的 DIY 方案卡**是否已经能显示效果图**。
+ * 用它（而不是「有没有 DIY 卡」）来决定要不要隐藏消息末尾的独立 frame：
+ * 🔴 曾经写成「有 DIY 卡就隐藏」，结果当那张卡拿不到图时（旧会话里前端兜底合成的
+ *    `diy_plan_card` 没有 task_id、或数据在落盘时被截断），图就被藏死了 ——
+ *    用户看到的现象正是「效果图没有同步到 DIY 方案的位置」。
+ * 语义：**图会显示在卡里 → 不重复渲染 frame；不会 → 独立 frame 兜住，图不丢**。
+ */
+function diyCoverReady(msg) {
+  if (!hasDiyCard(msg)) return false
+  // Advisor 轮询到的图会经 :msg-image 直接传给 DIY 卡渲染 → 卡里必然有图
+  if (msg && msg.image) return true
+  return (Array.isArray(msg && msg.cards) ? msg.cards : []).some(c => {
+    if (!c || !c.data) return false
+    if (c.ui === 'diy_plan_card') return !!(c.data.effect_image_url || c.data.image_url || c.data.image)
+    if (c.ui === 'plan_card' && Array.isArray(c.data.plans)) {
+      return c.data.plans.some(p => p && p.diy && (p.effect_image_url || p.image_url || p.image))
+    }
+    return false
+  })
 }
 
 function startImagePoll(msg, data) {
