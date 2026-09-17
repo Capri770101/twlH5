@@ -41,6 +41,20 @@ const MIME = {
   '.map': 'application/json'
 }
 
+/**
+ * 缓存策略 —— 直接决定「发版后用户要不要手动强刷」。
+ * 🔴 这里原本一个缓存头都没有：浏览器于是自行启发式缓存 index.html，
+ *    发版后用户仍拿旧入口（指向已被删掉的旧 chunk），页面看着「完全没变化」。
+ * 规则：index.html 是入口，必须 no-cache（每次回源验证）；
+ *      /assets/ 下的文件名自带内容 hash，改内容必然换名 → 可放心 immutable 长缓存。
+ */
+function cacheHeaders(urlPath) {
+  if (/^\/assets\//.test(urlPath)) {
+    return { 'Cache-Control': 'public, max-age=31536000, immutable' }
+  }
+  return { 'Cache-Control': 'no-cache, must-revalidate' }
+}
+
 function serveStatic(req, res) {
   let urlPath = decodeURIComponent(req.url.split('?')[0])
   if (urlPath === '/') urlPath = '/index.html'
@@ -51,20 +65,23 @@ function serveStatic(req, res) {
   }
   fs.stat(filePath, (err, stat) => {
     if (err || !stat.isFile()) {
-      // SPA fallback
+      // SPA fallback：一律按 index.html 对待 → no-cache
       const idx = path.join(DIST, 'index.html')
       fs.readFile(idx, (e2, data) => {
         if (e2) {
           res.writeHead(404)
           return res.end('not found')
         }
-        res.writeHead(200, { 'Content-Type': MIME['.html'] })
+        res.writeHead(200, { 'Content-Type': MIME['.html'], ...cacheHeaders('/index.html') })
         res.end(data)
       })
       return
     }
     const ext = path.extname(filePath).toLowerCase()
-    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' })
+    res.writeHead(200, {
+      'Content-Type': MIME[ext] || 'application/octet-stream',
+      ...cacheHeaders(urlPath)
+    })
     fs.createReadStream(filePath).pipe(res)
   })
 }
