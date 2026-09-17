@@ -1368,9 +1368,10 @@ export async function pollAgentTask(pollUrl, cb = {}) {
   let token = ''
   try { token = await ensureAgentToken() } catch (e) { return null }
   const ctrl = new AbortController()
-  const timer = setTimeout(() => ctrl.abort(), 90000)
+  const timer = setTimeout(() => ctrl.abort(), 150000)
   try {
-    for (let i = 0; i < 24; i++) {
+    // 生图通常十几秒，慢时会更久 —— 对齐官方 demo（45 次 × 3.5s），避免"等不到图就放弃"
+    for (let i = 0; i < 40; i++) {
       let d = null
       try {
         const res = await fetch(url, {
@@ -1403,7 +1404,7 @@ export async function pollAgentTask(pollUrl, cb = {}) {
         break
       }
       if (onStatus) onStatus(status || 'processing', '')
-      await new Promise(r => setTimeout(r, 2500))
+      await new Promise(r => setTimeout(r, 3500))
     }
   } catch (e) {
     /* 轮询失败静默：图片出不来不应影响对话本身 */

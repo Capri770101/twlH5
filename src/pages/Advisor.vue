@@ -73,8 +73,22 @@
     <!-- 对话区：唯一的滚动容器 -->
     <main ref="listEl" class="stage">
       <div class="log">
+        <!-- 欢迎区（仅新对话时显示，对齐官方 demo 的 hero）-->
+        <section v-if="showHero" class="hero">
+          <div class="hero-kicker">Botanical Atelier</div>
+          <h2>把<em>心意</em>，交给一束刚好的花</h2>
+          <p>说说送给谁、什么场合、预算多少 —— 我来帮你挑花材、定配色、配包装，还能直接生成效果图看看成品的样子。</p>
+          <div class="caps">
+            <span class="cap">花材搭配</span>
+            <span class="cap">配色包装</span>
+            <span class="cap">预算核算</span>
+            <span class="cap">效果图</span>
+            <span class="cap">贺卡文案</span>
+          </div>
+        </section>
+
         <div
-          v-for="(m, i) in messages"
+          v-for="(m, i) in visibleMessages"
           :key="i"
           class="rise"
           :class="m.role === 'user' ? 'msg-user' : 'msg-bot'"
@@ -91,8 +105,10 @@
             <!-- 流式状态：思考中 / 工具调用 -->
             <div v-if="m.streaming && !m.text" class="thinking-line">
               <span class="think-dots"><i></i><i></i><i></i></span>
-              <span v-if="m.tools && m.tools.length">正在{{ toolLabel(m.tools[m.tools.length - 1]) }}…</span>
-              <span v-else>正在构思…</span>
+              <span>{{ (m.tools && m.tools.length)
+                ? ('正在' + toolLabel(m.tools[m.tools.length - 1]) + '…')
+                : (m.thinkText || '正在构思…') }}</span>
+              <span class="think-elapsed">{{ m.thinkElapsed || 0 }}s</span>
             </div>
             <div v-else-if="m.streaming && m.tools && m.tools.length" class="tool-line">
               正在{{ toolLabel(m.tools[m.tools.length - 1]) }}…
@@ -113,15 +129,31 @@
               @go-detail="onGoDetail"
             />
 
-            <!-- 效果图（轮询任务回填） -->
+            <!-- 效果图（轮询回填；生成中显示 3:4 骨架 + 计时，出图后淡入）-->
             <figure v-if="m.image" class="frame">
-              <FlowerImage :src="m.image" :emoji="'🌸'" class="frame-img" />
+              <img
+                v-if="!m.imageBroken"
+                class="frame-img"
+                :class="{ on: m.imageOn }"
+                :src="m.image"
+                alt="效果图"
+                @load="m.imageOn = true"
+                @error="m.imageBroken = true"
+              />
+              <div v-else class="frame-pad">
+                <p class="plain">效果图加载失败，可稍后重试。</p>
+              </div>
               <figcaption class="frame-cap"><span>效果图</span><b>AI 生成</b></figcaption>
             </figure>
-            <div v-else-if="m.imageStatus === 'processing'" class="frame-loading">
-              <span class="fl-dot"></span><span class="fl-dot"></span><span class="fl-dot"></span>
-              <span class="fl-text">效果图生成中，稍等几秒…</span>
-            </div>
+            <figure v-else-if="m.imageStatus === 'processing'" class="frame">
+              <div class="frame-pad">
+                <div class="shimmer"></div>
+                <p class="plain frame-tip">
+                  正在生成效果图…<span class="think-elapsed">{{ m.imageElapsed || 0 }}s</span>
+                </p>
+              </div>
+              <figcaption class="frame-cap"><span>效果图</span><b>生成中</b></figcaption>
+            </figure>
             <p v-else-if="m.imageError" class="frame-error">{{ m.imageError }}</p>
 
             <!-- DIY 方案卡（真实智能体 plan_card / tool_calls） -->
@@ -218,7 +250,7 @@
 </template>
 
 <script setup>
-import { ref, nextTick, onMounted } from 'vue'
+import { ref, computed, nextTick, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import NavBar from '@/components/NavBar.vue'
 import FlowerImage from '@/components/FlowerImage.vue'
@@ -245,9 +277,27 @@ const placeholder = '说说送花对象、关系和想表达的心情…'
 const inputText = ref('')
 const GREETING = {
   role: 'ai',
+  // 标记为问候语：既用于「新对话时渲染欢迎区」，也让它**不参与**本地/平台历史合并
+  greeting: true,
   text: '你好，我是你的专属花艺小助手 🌸 告诉我送花对象、预算和场景，我来帮你搭配一束刚刚好的花（还能生成效果图哦）。'
 }
 const messages = ref([{ ...GREETING }])
+
+/** 思考阶段轮播文案（对齐官方 demo 的 THINK_STAGES，让等待过程有反馈）*/
+const THINK_STAGES = [
+  '正在理解你的需求…',
+  '正在检索花材与寓意…',
+  '正在挑选配色与包装…',
+  '正在核算预算与支数…',
+  '正在斟酌文案…'
+]
+let thinkTimer = null
+let thinkIdx = 0
+
+/** 还没产生任何实际对话 → 显示欢迎区 */
+const showHero = computed(() => messages.value.filter(m => m && !m.greeting).length === 0)
+/** 问候语由欢迎区承担，始终不单独渲染（否则发完第一条消息它会突然冒出来）*/
+const visibleMessages = computed(() => messages.value.filter(m => m && !m.greeting))
 const generating = ref(false)
 const sessionId = ref('')
 const agentMode = ref('real') // 'real' = 已连接真实智能体；'demo' = 回退 mock 演示
@@ -408,9 +458,13 @@ async function sendMessage() {
 
   // 先占位一条 AI 消息，流式的文本/卡片陆续填进来
   const idx = messages.value.length
-  messages.value.push({ role: 'ai', text: '', cards: [], tools: [], streaming: true, image: '', poll: null })
+  messages.value.push({
+    role: 'ai', text: '', cards: [], tools: [], streaming: true,
+    image: '', poll: null, thinkText: THINK_STAGES[0], thinkElapsed: 0
+  })
   const cur = () => messages.value[idx]
   const set = patch => Object.assign(cur(), patch)
+  startThinking(cur())
 
   abortCtl.value = new AbortController()
   stopped.value = false
@@ -481,6 +535,7 @@ async function sendMessage() {
   } catch (e) {
     set({ text: cur().text || '抱歉，刚刚网络有点小波动，换个说法再试试？' })
   } finally {
+    stopThinking()
     set({ streaming: false })
     generating.value = false
     abortCtl.value = null
@@ -628,6 +683,25 @@ function attachDiyPlan(msg) {
  * data 形如 { task_id, poll: '/tasks/xxx', result_url }；
  * status：processing 生成中 / done 成功（取 result_url）/ failed 失败（读 error）。
  */
+/** 思考阶段轮播 + 计时（对齐官方 demo；结束由 stopThinking 收尾）*/
+function startThinking(msg) {
+  stopThinking()
+  thinkIdx = 0
+  const t0 = Date.now()
+  const tick = () => {
+    if (!msg || !msg.streaming) return
+    msg.thinkText = THINK_STAGES[Math.min(thinkIdx, THINK_STAGES.length - 1)]
+    msg.thinkElapsed = Math.round((Date.now() - t0) / 1000)
+    thinkIdx++
+  }
+  tick()
+  thinkTimer = setInterval(tick, 2000)
+}
+
+function stopThinking() {
+  if (thinkTimer) { clearInterval(thinkTimer); thinkTimer = null }
+}
+
 function startImagePoll(msg, data) {
   if (!msg || msg.image) return
   // 没有 poll 就从卡片/文本里取；已有 poll（刷新后从本地恢复）则直接续查
@@ -643,13 +717,17 @@ function startImagePoll(msg, data) {
   if (msg._imagePolling) return // 同一条消息不重复轮询
   msg._imagePolling = true
   msg.imageStatus = msg.imageStatus || 'processing'
-  pollAgentTask(msg.poll, {
+  // 生成计时：生图通常要十几秒，显示「已等待 N 秒」比干等体验好
+  const t0 = Date.now()
+  msg.imageElapsed = 0
+  const clock = setInterval(() => { msg.imageElapsed = Math.round((Date.now() - t0) / 1000) }, 1000)
+  Promise.resolve(pollAgentTask(msg.poll, {
     onImage: img => { msg.image = img; msg.imageStatus = 'done' },
     onStatus: (st, err) => {
       msg.imageStatus = st
       if (st === 'failed') msg.imageError = err || '效果图生成失败'
     }
-  })
+  })).finally(() => clearInterval(clock))
 }
 
 /** 刷新 / 切换会话后：把「已提交但还没出图」的效果图任务接着轮询（poll 已随消息落盘）*/
@@ -1202,22 +1280,98 @@ onMounted(() => {
   0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
   40% { opacity: 1; transform: translateY(rpx(-6)); }
 }
+/* 已等待秒数（对齐 demo 的 think-elapsed）*/
+.think-elapsed {
+  font-family: var(--font-num);
+  font-size: rpx(23);
+  color: var(--ink-3);
+  letter-spacing: 0.08em;
+  flex: none;
+}
+
+/* ── 欢迎区（新对话时显示，对齐官方 demo 的 hero）── */
+.hero { padding: rpx(16) 0 rpx(8); }
+.hero-kicker {
+  font-family: var(--font-num);
+  font-size: rpx(21);
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  color: var(--brass);
+  margin-bottom: rpx(24);
+}
+.hero h2 {
+  font-family: var(--font-display);
+  font-size: rpx(62);
+  font-weight: 600;
+  line-height: 1.42;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+}
+.hero h2 em {
+  font-style: normal;
+  color: var(--moss);
+  border-bottom: rpx(4) solid var(--brass-2);
+  padding-bottom: rpx(4);
+}
+.hero p {
+  font-size: rpx(28);
+  color: var(--ink-2);
+  margin-top: rpx(30);
+  line-height: 1.85;
+}
+.caps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: rpx(16);
+  margin-top: rpx(40);
+}
+.cap {
+  font-size: rpx(23);
+  color: var(--ink-2);
+  background: var(--paper-2);
+  border: 1rpx solid var(--line);
+  padding: rpx(10) rpx(24);
+  border-radius: rpx(999);
+  letter-spacing: 0.03em;
+}
 
 /* ── 效果图 ── */
+/* 生成的图是 3:4 竖构图；移动端撑满消息区（对齐官方 demo），桌面端也不会变成巨幅 */
 .frame {
   margin: rpx(30) auto 0;
-  max-width: rpx(560);
+  max-width: 100%;
   border: 1rpx solid var(--line-2);
   border-radius: rpx(28);
   overflow: hidden;
   background: var(--paper-2);
   box-shadow: 0 rpx(4) rpx(8) rgba(30, 28, 25, 0.05), 0 rpx(24) rpx(64) rgba(30, 28, 25, 0.07);
 }
+.frame-pad { padding: rpx(44); }
+/* 出图后淡入（onload 才加 .on），避免半张图先闪出来 */
 .frame-img {
   width: 100%;
   display: block;
   background: var(--paper-3);
-  :deep(img) { width: 100%; height: auto; display: block; }
+  opacity: 0;
+  transition: opacity 0.6s ease;
+  &.on { opacity: 1; }
+}
+.frame-tip {
+  margin-top: rpx(28);
+  text-align: center;
+  font-size: rpx(26);
+  color: var(--ink-3);
+}
+/* 生成中的骨架屏（3:4 闪烁），比转圈更贴近最终版式 */
+.shimmer {
+  aspect-ratio: 3 / 4;
+  border-radius: rpx(18);
+  background: linear-gradient(100deg, #efeae0 20%, #f8f5ee 42%, #efeae0 64%);
+  background-size: 220% 100%;
+  animation: shimmer-move 1.6s linear infinite;
+}
+@keyframes shimmer-move {
+  to { background-position: -220% 0; }
 }
 .frame-cap {
   padding: rpx(22) rpx(36);
@@ -1231,44 +1385,9 @@ onMounted(() => {
   letter-spacing: 0.04em;
 }
 .frame-cap b { font-family: var(--font-num); color: var(--ink-2); font-weight: 500; }
-
-/* 效果图生成中 / 失败（对齐 image_task 契约的 processing / failed 两个状态）*/
-.frame-loading {
-  margin: rpx(30) auto 0;
-  max-width: rpx(560);
-  min-height: rpx(180);
-  border: 1rpx dashed var(--line-2);
-  border-radius: rpx(28);
-  background: var(--paper-2);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: rpx(10);
-  padding: rpx(30);
-  box-sizing: border-box;
-}
-.fl-dot {
-  width: rpx(12);
-  height: rpx(12);
-  border-radius: 50%;
-  background: var(--brass);
-  animation: fl-blink 1.2s infinite ease-in-out;
-}
-.fl-dot:nth-child(2) { animation-delay: 0.2s; }
-.fl-dot:nth-child(3) { animation-delay: 0.4s; }
-.fl-text {
-  margin-left: rpx(12);
-  font-size: rpx(24);
-  color: var(--ink-3);
-  letter-spacing: 0.04em;
-}
-@keyframes fl-blink {
-  0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
-  40% { opacity: 1; transform: translateY(rpx(-4)); }
-}
 .frame-error {
   margin: rpx(18) auto 0;
-  max-width: rpx(560);
+  max-width: 100%;
   font-size: rpx(24);
   color: var(--ink-3);
   text-align: center;
