@@ -118,6 +118,11 @@
               <FlowerImage :src="m.image" :emoji="'🌸'" class="frame-img" />
               <figcaption class="frame-cap"><span>效果图</span><b>AI 生成</b></figcaption>
             </figure>
+            <div v-else-if="m.imageStatus === 'processing'" class="frame-loading">
+              <span class="fl-dot"></span><span class="fl-dot"></span><span class="fl-dot"></span>
+              <span class="fl-text">效果图生成中，稍等几秒…</span>
+            </div>
+            <p v-else-if="m.imageError" class="frame-error">{{ m.imageError }}</p>
 
             <!-- DIY 方案卡（真实智能体 plan_card / tool_calls） -->
             <div v-if="m.plans && m.plans.length" class="prods">
@@ -220,11 +225,11 @@ import FlowerImage from '@/components/FlowerImage.vue'
 import store, { addToCart, saveDiyPlan, yuan } from '@/store'
 import AdvisorCards from '@/components/AdvisorCards.vue'
 import {
-  chatWithAdvisor, streamAdvisorChat, pollAgentTask, ADVISOR_PRESETS, AGENT_CONFIG,
-  listAgentConversations, fetchAgentMessages
+  chatWithAdvisor, streamAdvisorChat, pollAgentTask, normalizeAgentAssetUrl,
+  ADVISOR_PRESETS, AGENT_CONFIG, listAgentConversations, fetchAgentMessages
 } from '@/mock/api'
 import { extractDiyPlan, isDiyScene } from '@/utils/extractDiyPlan'
-import { mergeAgentMessages, slimMessage } from '@/utils/advisorHistory'
+import { mergeAgentMessages, slimMessage, extractImageTaskId } from '@/utils/advisorHistory'
 import { toast } from '@/utils/toast'
 
 const router = useRouter()
@@ -332,6 +337,7 @@ function selectConversation(id) {
   agentMode.value = c.agentMode || 'real'
   drawerOpen.value = false
   scrollToBottom()
+  resumeImageTasks(c.messages) // 接着查没出图的效果图任务
 }
 
 function deleteConversation(id) {
@@ -428,6 +434,10 @@ async function sendMessage() {
           const ui = (ev.data && ev.data.ui) || 'text'
           const data = (ev.data && ev.data.data) || {}
           cur().cards.push({ ui, data })
+          // 效果图任务：按 /ui-contract，前端要拿 data.poll 去轮询 /tasks/{task_id}。
+          // ⚠️ 实测平台的 task_id / poll 是**挂在 plan_card 的 data 上**的（并不是独立的 image_task 卡片），
+          //    所以判断条件放宽为「data 里带了 poll / task_id / result_url」。
+          if (data && (data.poll || data.task_id || data.result_url)) startImagePoll(cur(), data)
           gotAny = true
           scrollToBottom()
         } else if (ev.event === 'tool_call') {
@@ -437,12 +447,14 @@ async function sendMessage() {
         } else if (ev.event === 'done') {
           if (ev.data && ev.data.session_id) sessionId.value = ev.data.session_id
           attachDiyPlan(cur())
+          attachImageTaskFromText(cur())
         }
       }
     })
 
     // 兜底：若平台没发 done（异常中断等），流结束后再尝试一次（幂等）
     attachDiyPlan(cur())
+    attachImageTaskFromText(cur())
 
     if (r && (r.ok || r.gotAny)) {
       agentMode.value = 'real'
@@ -464,9 +476,7 @@ async function sendMessage() {
         poll: result.poll || null
       })
       const poll = cur().poll
-      if (poll) {
-        pollAgentTask(poll, img => { if (cur()) cur().image = img })
-      }
+      if (poll) startImagePoll(cur()) // 统一走同一条轮询逻辑（含状态/失败处理）
     }
   } catch (e) {
     set({ text: cur().text || '抱歉，刚刚网络有点小波动，换个说法再试试？' })
@@ -611,6 +621,50 @@ function attachDiyPlan(msg) {
   if (!msg.cards) msg.cards = []
   msg.cards.push({ ui: 'diy_plan_card', data: plan })
   scrollToBottom()
+}
+
+/**
+ * 效果图任务：按平台 /ui-contract 的 image_task 契约轮询。
+ * data 形如 { task_id, poll: '/tasks/xxx', result_url }；
+ * status：processing 生成中 / done 成功（取 result_url）/ failed 失败（读 error）。
+ */
+function startImagePoll(msg, data) {
+  if (!msg || msg.image) return
+  // 没有 poll 就从卡片/文本里取；已有 poll（刷新后从本地恢复）则直接续查
+  if (!msg.poll) {
+    const d = data || {}
+    // result_url 可能是相对路径（/generated/xxx.png），必须归一化，否则 img 会打到前端域名上
+    if (d.result_url) { msg.image = normalizeAgentAssetUrl(d.result_url); return }
+    const taskId = String(d.task_id || '').trim()
+    const poll = String(d.poll || '').trim() || (taskId ? ('/tasks/' + taskId) : '')
+    if (!poll) return
+    msg.poll = poll
+  }
+  if (msg._imagePolling) return // 同一条消息不重复轮询
+  msg._imagePolling = true
+  msg.imageStatus = msg.imageStatus || 'processing'
+  pollAgentTask(msg.poll, {
+    onImage: img => { msg.image = img; msg.imageStatus = 'done' },
+    onStatus: (st, err) => {
+      msg.imageStatus = st
+      if (st === 'failed') msg.imageError = err || '效果图生成失败'
+    }
+  })
+}
+
+/** 刷新 / 切换会话后：把「已提交但还没出图」的效果图任务接着轮询（poll 已随消息落盘）*/
+function resumeImageTasks(list) {
+  for (const m of (list || [])) {
+    if (m && m.poll && !m.image) startImagePoll(m)
+  }
+}
+
+/** 兜底：平台没下发 image_task 卡片时，从正文的任务编号自行去查（见 advisorHistory.extractImageTaskId）*/
+function attachImageTaskFromText(msg) {
+  if (!msg || msg.poll || msg.image) return
+  const taskId = extractImageTaskId(msg.text)
+  if (!taskId) return
+  startImagePoll(msg, { task_id: taskId })
 }
 
 // DIY 方案「保存到我的方案」 → store（localStorage 持久化，见「我的 → 我的方案」）
@@ -1177,6 +1231,48 @@ onMounted(() => {
   letter-spacing: 0.04em;
 }
 .frame-cap b { font-family: var(--font-num); color: var(--ink-2); font-weight: 500; }
+
+/* 效果图生成中 / 失败（对齐 image_task 契约的 processing / failed 两个状态）*/
+.frame-loading {
+  margin: rpx(30) auto 0;
+  max-width: rpx(560);
+  min-height: rpx(180);
+  border: 1rpx dashed var(--line-2);
+  border-radius: rpx(28);
+  background: var(--paper-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: rpx(10);
+  padding: rpx(30);
+  box-sizing: border-box;
+}
+.fl-dot {
+  width: rpx(12);
+  height: rpx(12);
+  border-radius: 50%;
+  background: var(--brass);
+  animation: fl-blink 1.2s infinite ease-in-out;
+}
+.fl-dot:nth-child(2) { animation-delay: 0.2s; }
+.fl-dot:nth-child(3) { animation-delay: 0.4s; }
+.fl-text {
+  margin-left: rpx(12);
+  font-size: rpx(24);
+  color: var(--ink-3);
+  letter-spacing: 0.04em;
+}
+@keyframes fl-blink {
+  0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(rpx(-4)); }
+}
+.frame-error {
+  margin: rpx(18) auto 0;
+  max-width: rpx(560);
+  font-size: rpx(24);
+  color: var(--ink-3);
+  text-align: center;
+}
 
 /* ── 商品/方案卡（网格）── */
 .prods {

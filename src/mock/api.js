@@ -1339,31 +1339,78 @@ export async function streamAdvisorChat({ message, shopId = 'default', sessionId
   }
 }
 
-// 轮询效果图任务（/tasks/{id}），返回图片 URL 或 null
-export async function pollAgentTask(pollUrl, onImage) {
-  if (!pollUrl) return
+/**
+ * 平台返回的资源地址可能是**相对路径**（实测效果图是 `/generated/xxx.png`）。
+ * 直接塞进 <img src> 会打到前端自己的域名上 → 图裂。统一补上 apiBase（/agent）走反代。
+ */
+export function normalizeAgentAssetUrl(u) {
+  const s = String(u || '').trim()
+  if (!s) return ''
+  if (/^https?:\/\//i.test(s) || s.startsWith('data:')) return s
+  return AGENT_CONFIG.apiBase + (s.startsWith('/') ? s : '/' + s)
+}
+
+/**
+ * 轮询效果图任务。平台 /ui-contract 的 image_task 契约：
+ *   data = { task_id, poll: '/tasks/xxx', result_url }
+ *   status：processing 生成中 / done 成功（取 result_url）/ failed 失败（读 error）
+ * @param {string} pollUrl 平台给的 poll 路径（**相对路径**，如 /tasks/xxx）或完整 URL
+ * @param {Function|{onImage?:Function,onStatus?:Function}} cb
+ */
+export async function pollAgentTask(pollUrl, cb = {}) {
+  const onImage = typeof cb === 'function' ? cb : cb.onImage // 兼容旧的单回调签名
+  const onStatus = typeof cb === 'function' ? null : cb.onStatus
+  if (!pollUrl) return null
+  // ⚠️ 平台给的是相对路径（/tasks/xxx），必须经 apiBase（/agent）转发以便注入 X-API-Key；
+  //    直接 fetch 会打到前端自己的域名上 → 永远 404，效果图也就永远出不来。
+  const url = String(pollUrl).startsWith('http') ? String(pollUrl) : (AGENT_CONFIG.apiBase + pollUrl)
+  // ⚠️ /tasks/{id} 需要 **Bearer 登录凭证**（实测只带 X-API-Key 会 401「需要 Bearer 登录凭证」）
+  let token = ''
+  try { token = await ensureAgentToken() } catch (e) { return null }
   const ctrl = new AbortController()
-  const timer = setTimeout(() => ctrl.abort(), 30000)
+  const timer = setTimeout(() => ctrl.abort(), 90000)
   try {
-    for (let i = 0; i < 12; i++) {
-      const res = await fetch(pollUrl, {
-        headers: agentKeyHeader(),
-        signal: ctrl.signal
-      })
-      if (!res.ok) break
-      const d = await res.json()
-      const img =
-        (d && (d.image_url || d.effect_image_url || d.url || (d.result && d.result.image_url))) || null
-      const done = d && (d.status === 'done' || d.status === 'completed' || d.stage === 'done')
-      if (img) { onImage && onImage(img); if (done) break }
-      if (done) break
+    for (let i = 0; i < 24; i++) {
+      let d = null
+      try {
+        const res = await fetch(url, {
+          headers: {
+            Accept: 'application/json',
+            ...(token ? { Authorization: 'Bearer ' + token } : {}),
+            ...agentKeyHeader()
+          },
+          signal: ctrl.signal
+        })
+        if (!res.ok) break
+        d = await res.json()
+      } catch (e) { break }
+      if (!d || typeof d !== 'object') break
+
+      const status = String(d.status || d.stage || '').toLowerCase()
+      // 契约字段是 result_url；后面几个是兼容其它写法。
+      // ⚠️ 实测 result_url 是**相对路径**（/generated/xxx.png），必须归一化后才能给 <img>
+      const raw = d.result_url || d.image_url || d.effect_image_url || d.url ||
+        (d.result && d.result.image_url) || ''
+      const img = normalizeAgentAssetUrl(raw)
+      if (img && onImage) onImage(img)
+
+      if (status === 'failed' || status === 'error') {
+        if (onStatus) onStatus('failed', d.error || d.message || '')
+        break
+      }
+      if (status === 'done' || status === 'completed' || status === 'succeeded') {
+        if (onStatus) onStatus('done', '')
+        break
+      }
+      if (onStatus) onStatus(status || 'processing', '')
       await new Promise(r => setTimeout(r, 2500))
     }
   } catch (e) {
-    /* 轮询失败静默 */
+    /* 轮询失败静默：图片出不来不应影响对话本身 */
   } finally {
     clearTimeout(timer)
   }
+  return null
 }
 
 export const ADVISOR_PRESETS = Object.keys(SCENE_PRESETS).map(key => ({ key, ...SCENE_PRESETS[key] }))

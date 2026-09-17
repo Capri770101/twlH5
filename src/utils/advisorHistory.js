@@ -60,11 +60,29 @@ export function slimValue(v, depth = 0) {
   return v
 }
 
+/**
+ * 从助手正文里捞效果图任务编号（兜底用）。
+ * 平台有时**不下发 image_task 卡片**，只在正文里报一句
+ * 「效果图任务已经提交（编号 bd51f44545714042）」—— 前端因此无从轮询，效果图永远出不来。
+ * 平台正常下发卡片后，这段天然不会再命中。
+ */
+const IMG_TASK_RE = /(?:编号|任务号|task[_ ]?id)[\s:：=]*([0-9a-fA-F]{12,40})/i
+
+export function extractImageTaskId(text) {
+  const m = String(text || '').match(IMG_TASK_RE)
+  return m ? m[1] : ''
+}
+
 export function slimMessage(m) {
   const out = { ...(m || {}) }
-  // base64 效果图很占地方，不落盘（刷新后重新生成）
+  // base64 效果图很占地方，不落盘；但**结果图 URL 要留**（平台返回的 result_url 是短地址）
   if (typeof out.image === 'string' && out.image.length > 2000) out.image = ''
-  if (out.poll) out.poll = null // 运行时任务句柄，刷新后已失效
+  // ⚠️ poll 是**相对路径字符串**（/tasks/xxx），必须保留：
+  //    刷新后要接着把「已提交但还没出图」的效果图任务轮询下去，否则图永远出不来。
+  //    只有非字符串（异常值）才清掉。
+  if (out.poll && typeof out.poll !== 'string') out.poll = null
+  // 运行时防重标记不能落盘（否则刷新后会被当成"已在轮询中"而不再启动）
+  delete out._imagePolling
   if (Array.isArray(out.cards)) {
     out.cards = out.cards.slice(0, 8).map(c => ({ ui: c && c.ui, data: slimValue(c && c.data) }))
   }
