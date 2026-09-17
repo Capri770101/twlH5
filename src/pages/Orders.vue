@@ -58,12 +58,15 @@
           <button v-if="!order._hasReview" class="btn btn-outline btn-sm" @click.stop="goReview(order.id)">去评价</button>
           <button class="btn btn-primary btn-sm" @click.stop="repeatOrder(order)">再来一单</button>
         </div>
-        <div v-else-if="!['refunding', 'refunded', 'refund_failed', 'cancelled'].includes(order.status)" class="order-actions">
+        <div v-else-if="!['refunding', 'refunded', 'cancelled'].includes(order.status)" class="order-actions">
           <button v-if="order._canRefund" class="btn btn-outline btn-sm" @click.stop="openRefund(order)">申请退款</button>
           <button class="btn btn-primary btn-sm" @click.stop="repeatOrder(order)">再来一单</button>
         </div>
         <div v-if="order.status === 'refunding'" class="order-actions">
-          <span class="order-refunding-tip">等待商家处理退款…</span>
+          <span class="order-refunding-tip">退款处理中，请留意到账通知</span>
+        </div>
+        <div v-else-if="order.status === 'refund_failed'" class="order-actions">
+          <span class="order-refunding-tip">退款未成功，可重新申请</span>
         </div>
       </div>
     </div>
@@ -301,10 +304,17 @@ function openRefund(order) {
   refundTarget.value = order
   showRefund.value = true
 }
-function onRefundSuccess() {
-  if (refundTarget.value) refundTarget.value.status = 'refunding'
+function onRefundSuccess(res) {
   showRefund.value = false
-  toast('已提交退款申请，商家处理中')
+  const st = (res && res.status) || 'refunding'
+  toast(
+    st === 'refunded' ? '退款已原路退回'
+      : st === 'refund_failed' ? '退款未成功，可稍后重试或联系客服'
+        : '已提交退款申请，处理中'
+  )
+  // 以服务端状态为准重新拉取：以前只改内存里的 status，一刷新就变回「已支付」，
+  // 而且 _canRefund 仍为真 → 可以反复申请退款。
+  load()
 }
 
 onMounted(load)

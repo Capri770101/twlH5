@@ -11,6 +11,7 @@ import fs from 'fs'
 import { wxpayRequest, decryptResource, verifyNotify, buildJsapiPayParams, WXPAY, WX_API_BASE } from './wxpay.js'
 import { hq, withTx } from './h5db.js'
 import { resolveSubMch } from './submch.js'
+import { resolveUser as resolveTokenUser } from './token.js'
 import {
   PS, markPending, scanOnce, ensureReturnedBeforeRefund, psStatusForOrder, addReceiver,
   calcCommission, forceShare, psStats
@@ -179,37 +180,68 @@ router.post('/close', async (req, res) => {
   }
 })
 
-// ---------- 退款（服务商） ----------
+// ---------- 退款核心（pay 与 orders 共用） ----------
+/**
+ * 向微信发起一笔退款。**只负责出账，不碰订单状态**——订单状态由调用方按结果落库
+ * （用户端入口：POST /api/orders/:id/refund）。
+ * @returns {Promise<{ok:true, refundNo:string, amountFen:number, wxStatus:string, raw:object}>}
+ * @throws  {{status:number, message:string}} 业务错误（含微信侧失败）
+ */
+export async function refundOrderCore(outTradeNo, { reason, amountFen, subMchid, shopId } = {}) {
+  const sub = subMchid || (shopId ? (await resolveSubMch(shopId)).subMchid : null)
+  if (!sub || !outTradeNo) throw { status: 400, message: 'missing outTradeNo/subMchid' }
+
+  // ① 已分账的订单必须先回退分账资金再退款
+  //    （微信规则：分账后退款需接收方同意，资金先回退到分账方账户；否则退款失败/资金对不上）
+  const ret = await ensureReturnedBeforeRefund(String(outTradeNo))
+  if (!ret.ok) throw { status: 409, message: ret.message || '分账回退未完成，暂不能退款' }
+
+  // ② 金额以库中订单为准：amount.total 必须是**原订单总额**，refund 才是退款额（支持部分退款）
+  const ordRows = await hq('SELECT id, total_price FROM orders WHERE id = ? LIMIT 1', [outTradeNo])
+  if (!ordRows.length) throw { status: 404, message: '订单不存在' }
+  const orderTotal = Math.round(Number(ordRows[0].total_price) || 0)
+  const refundFen = amountFen ? Math.round(Number(amountFen)) : orderTotal
+  if (!(refundFen > 0) || refundFen > orderTotal) {
+    throw { status: 400, message: '退款金额不合法（应为 1 ~ ' + orderTotal + ' 分）' }
+  }
+
+  // ③ out_refund_no **由订单号派生**（原来用 'R'+Date.now()，每次都是新单号）。
+  //    同一 out_refund_no 在微信侧是幂等的：重复调用只会返回**同一笔**退款，不会重复出账。
+  //    这是「重复申请退款」在资金层面的最后一道闸门。
+  const outRefundNo = 'R' + String(outTradeNo)
+  const body = {
+    sub_mchid: sub,
+    out_trade_no: String(outTradeNo),
+    out_refund_no: outRefundNo,
+    reason: String(reason || '用户申请退款').slice(0, 80),
+    amount: { refund: refundFen, total: orderTotal, currency: 'CNY' }
+  }
+  console.log('[pay] 发起退款 out_trade_no=%s out_refund_no=%s 退款=%d分/订单=%d分',
+    outTradeNo, outRefundNo, refundFen, orderTotal)
+  const r = await wxpayRequest('POST', '/v3/refund/domestic/refunds', body)
+  // 微信返回 status：SUCCESS 已成功 / PROCESSING 处理中 / ABNORMAL 异常 / CLOSED 已关闭
+  return { ok: true, refundNo: outRefundNo, amountFen: refundFen, wxStatus: String((r && r.status) || '').toUpperCase(), raw: r }
+}
+
+// ---------- 退款（服务商，直连底层接口） ----------
+// ⚠️ 用户端**不应**直接调这个：它只出账、不写订单状态（历史 bug 的根源）。
+//    用户申请退款请走 POST /api/orders/:id/refund。
+//    这里补上「必须登录且是订单本人」的校验——否则知道订单号的人就能把别人订单退掉。
 router.post('/refund', async (req, res) => {
   try {
     const { outTradeNo, reason, amountFen, shopId, subMchid } = req.body
-    const sub = subMchid || (shopId ? (await resolveSubMch(shopId)).subMchid : null)
-    if (!sub || !outTradeNo) return res.status(400).json({ error: 'missing outTradeNo/subMchid' })
-
-    // ① 已分账的订单必须先回退分账资金再退款
-    //    （微信规则：分账后退款需接收方同意，资金先回退到分账方账户；否则退款失败/资金对不上）
-    const ret = await ensureReturnedBeforeRefund(String(outTradeNo))
-    if (!ret.ok) return res.status(409).json({ error: ret.message || '分账回退未完成，暂不能退款' })
-
-    // ② 金额以库中订单为准：amount.total 必须是**原订单总额**，refund 才是退款额（支持部分退款）
-    const ordRows = await hq('SELECT id, total_price FROM orders WHERE id = ? LIMIT 1', [outTradeNo])
+    if (!outTradeNo) return res.status(400).json({ error: 'missing outTradeNo' })
+    const u = await resolveTokenUser(req)
+    const ordRows = await hq('SELECT user_id FROM orders WHERE id = ? LIMIT 1', [outTradeNo])
     if (!ordRows.length) return res.status(404).json({ error: '订单不存在' })
-    const orderTotal = Math.round(Number(ordRows[0].total_price) || 0)
-    const refundFen = amountFen ? Math.round(Number(amountFen)) : orderTotal
-    if (!(refundFen > 0) || refundFen > orderTotal) {
-      return res.status(400).json({ error: '退款金额不合法（应为 1 ~ ' + orderTotal + ' 分）' })
+    const owner = ordRows[0].user_id
+    if (!u || owner == null || Number(owner) !== Number(u.id)) {
+      return res.status(403).json({ error: '无权对该订单发起退款' })
     }
-    const body = {
-      sub_mchid: sub,
-      out_trade_no: String(outTradeNo),
-      out_refund_no: 'R' + Date.now(),
-      reason: String(reason || '用户申请退款').slice(0, 80),
-      amount: { refund: refundFen, total: orderTotal, currency: 'CNY' }
-    }
-    const r = await wxpayRequest('POST', '/v3/refund/domestic/refunds', body)
+    const r = await refundOrderCore(outTradeNo, { reason, amountFen, shopId, subMchid })
     return res.json(r)
   } catch (e) {
-    return res.status(500).json({ error: String(e.message || e) })
+    return res.status((e && e.status) || 500).json({ error: String((e && e.message) || e) })
   }
 })
 

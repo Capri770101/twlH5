@@ -108,6 +108,19 @@ export async function shareOrder(o) {
   const subMchid = o.sub_mchid || (await resolveSubMch(String(o.shop_id || '')).catch(() => null) || {}).subMchid
   if (!subMchid) return markRetry(o.id, 'NO_SUB_MCHID', '未配置子商户号 sub_mchid').then(() => ({ ok: false }))
 
+  // —— 防御闸门：已退款/退款中/已取消的订单一律不分账 ——
+  // 不管调用方是扫描器、forceShare 还是运维接口，都在这里再挡一次（scanOnce 已有 SQL 过滤）。
+  const stRows = await hq('SELECT status, ps_state FROM orders WHERE id=? LIMIT 1', [o.id])
+  const stRow = (stRows && stRows[0]) || {}
+  const st = String(stRow.status || '')
+  if (['refunding', 'refunded', 'refund_failed', 'cancelled', 'pending'].includes(st)) {
+    if (String(stRow.ps_state || '') === 'pending') {
+      await hq("UPDATE orders SET ps_state='cancelled', ps_updated_at=NOW() WHERE id=? AND ps_state='pending'", [o.id])
+    }
+    console.warn('[分账] 跳过（订单状态 %s 不可分账）：%s', st, o.id)
+    return { ok: true, skipped: true, message: '订单状态不可分账：' + st }
+  }
+
   const ratio = normRatio(o.ps_ratio, 0)
   const amount = Number(o.ps_amount) || calcCommission(o.total_price, ratio)
   if (amount <= 0) {
@@ -211,10 +224,15 @@ async function pollProcessing() {
 
 /** 扫描一次：到期未分账的执行分账 + 轮询进行中的分账 */
 export async function scanOnce() {
+  // ⚠️ 必须同时筛**订单状态**，不能只看 ps_state：
+  //    支付成功就把 ps_state 标成 pending，而退款/取消**不会**自动清掉它。
+  //    只按 ps_state 筛的后果 = 一笔已全额退款的订单，在支付满 24h 后照样被拿去分账
+  //    （资金已退给买家，却要从花店账户划走佣金）。2026-09-17 实测复现。
   const rows = await hq(
     `SELECT id, shop_id, sub_mchid, total_price, wx_transaction_id, ps_ratio, ps_amount
        FROM orders
       WHERE ps_state='pending' AND pay_time IS NOT NULL
+        AND status IN ('paid','making','delivering','completed')
         AND pay_time <= DATE_SUB(NOW(), INTERVAL ${DELAY_HOURS} HOUR)
         AND (ps_updated_at IS NULL OR ps_updated_at < DATE_SUB(NOW(), INTERVAL ${RETRY_MINUTES} MINUTE))
       ORDER BY pay_time ASC LIMIT 50`)

@@ -100,6 +100,29 @@
           <span class="info-label">支付时间</span>
           <span class="info-value">{{ order.payTime }}</span>
         </div>
+        <!-- 退款信息：申请后由服务端落库回显（退款单号/金额/原因/时间）-->
+        <template v-if="order.refund">
+          <div class="info-row">
+            <span class="info-label">退款金额</span>
+            <span class="info-value refund-amount">{{ money(order.refund.amount) }}</span>
+          </div>
+          <div v-if="order.refund.reason" class="info-row">
+            <span class="info-label">退款原因</span>
+            <span class="info-value">{{ order.refund.reason }}</span>
+          </div>
+          <div v-if="order.refund.applyTime" class="info-row">
+            <span class="info-label">申请时间</span>
+            <span class="info-value">{{ order.refund.applyTime }}</span>
+          </div>
+          <div v-if="order.refund.time" class="info-row">
+            <span class="info-label">退款时间</span>
+            <span class="info-value">{{ order.refund.time }}</span>
+          </div>
+          <div v-if="order.refund.no" class="info-row">
+            <span class="info-label">退款单号</span>
+            <span class="info-value">{{ order.refund.no }}</span>
+          </div>
+        </template>
         <div v-if="order.cardContent" class="info-row">
           <span class="info-label">💌 贺卡</span>
           <span class="info-value card-content">{{ order.cardContent }}</span>
@@ -208,15 +231,27 @@ function goReview() {
 
 
 const showRefund = ref(false)
-function onRefundSuccess() {
-  if (order.value) {
-    order.value = { ...order.value, status: 'refunding', statusText: '退款中' }
+async function onRefundSuccess(res) {
+  const st = (res && res.status) || 'refunding'
+  toast(
+    st === 'refunded' ? '退款已原路退回'
+      : st === 'refund_failed' ? '退款未成功，可稍后重试或联系客服'
+        : '已提交退款申请，处理中'
+  )
+  // 重新拉取详情：状态以服务端为准（以前只改内存，刷新后回到「已支付」）
+  await reload()
+}
+
+async function reload() {
+  try {
+    order.value = await getOrderDetail(route.params.id)
+  } catch (e) {
+    /* 保持当前内容，由页面已有逻辑提示 */
   }
-  toast('已提交退款申请，商家处理中')
 }
 
 onMounted(async () => {
-  order.value = await getOrderDetail(route.params.id)
+  await reload()
   loading.value = false
 })
 
@@ -388,8 +423,7 @@ onMounted(async () => {
 }
 .info-copy {
   font-size: var(--fs-caption);
-  color: var(--primary);
-  padding: rpx(4) rpx(16);
+  color: var(--primary);  padding: rpx(4) rpx(16);
   background: var(--primary-light);
   border-radius: rpx(6);
   flex-shrink: 0;
@@ -400,6 +434,10 @@ onMounted(async () => {
 }
 .card-content {
   color: #FF6B6B;
+}
+.refund-amount {
+  color: #E8615D;
+  font-weight: 600;
 }
 .aftersale-entry {
   margin-top: rpx(4);

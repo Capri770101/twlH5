@@ -219,7 +219,8 @@ function decorateOrder(o) {
     reviewTags: o.reviewTags || (rv && rv.tags) || [],
     review: o.review || (rv && rv.content) || '',
     _canDelete: ['completed', 'refunded', 'refund_failed', 'cancelled'].includes(o.status),
-    _canRefund: ['pending', 'making', 'delivering'].includes(o.status),
+    // refund_failed 允许重新申请：上一次没退成功，且退款单号固定（微信侧幂等），不会重复出账
+    _canRefund: ['pending', 'making', 'delivering', 'refund_failed'].includes(o.status),
     _totalQty: (o.items || []).reduce((s, i) => s + (i.quantity || 1), 0)
   }
 }
@@ -325,25 +326,25 @@ export async function getOrderDetail(id) {
 
 // ---------- 申请退款（服务商分账退款，调 /pay/refund） ----------
 // 真实分支：ensureGuestAuth 拿 token → POST /pay/refund（outTradeNo/reason/amountFen/shopId）
-// 后端退款依赖微信支付 v3 物料；若后端未就绪/缺失物料，乐观返回成功，由订单状态机后续更新。
-export async function refundOrder(orderId, { reason, amountFen, shopId } = {}) {
+// 申请退款：走订单侧接口落库并返回服务端最终状态；仅后端完全不可达时才回退离线占位。
+export async function refundOrder(orderId, { reason, amountFen } = {}) {
   if (REAL_API_ENABLED) {
-    try {
-      const a = await ensureGuestAuth()
-      if (!a.offline) {
-        return await realPost('/pay/refund', {
-          outTradeNo: String(orderId),
-          reason: reason || '用户申请退款',
-          amountFen: Math.round(Number(amountFen) || 0),
-          shopId: shopId || 'default'
-        }, a.token)
-      }
-    } catch (e) {
-      console.warn('[api] /pay/refund 后端未就绪，乐观提交：', e && e.message)
+    const a = await ensureGuestAuth()
+    if (!a.offline) {
+      // 走「订单侧」的申请退款接口：它会落库（状态 + 退款单号/金额/原因/时间）并返回最终状态。
+      // ⚠️ 两处历史坑，别再退回去：
+      //   ① 以前调 /pay/refund —— 那是只出账、不写订单状态的底层接口，
+      //      导致「钱真退了、列表里还是已支付、还能反复申请退款」；
+      //   ② 以前把异常 catch 掉再乐观返回 {ok:true} —— 后端失败用户也看到「提交成功」。
+      //      现在失败必须抛出去，让页面提示真实原因。
+      return await realPost('/orders/' + encodeURIComponent(orderId) + '/refund', {
+        reason: reason || '',
+        amountFen: Math.round(Number(amountFen) || 0)
+      }, a.token)
     }
   }
   await delay(300)
-  return { ok: true, optimistic: true }
+  return { ok: true, offline: true, status: 'refunding', statusText: '退款中' }
 }
 
 /** 提交订单：真实后端落库（快照+服务端计价），返回新订单号 */

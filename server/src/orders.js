@@ -9,6 +9,7 @@ import express from 'express'
 import { hq, withTx } from './h5db.js'
 import { resolveUser as resolveTokenUser } from './token.js'
 import { toFlower, storeAllFlowers } from './store.js'
+import { refundOrderCore } from './pay.js'
 
 const router = express.Router()
 
@@ -96,6 +97,15 @@ function toFront(o, items = []) {
       region: o.addr_region || '',
       detail: o.addr_detail || ''
     },
+    // 退款明细（有则透出，前端订单详情据此展示「退款信息」）
+    refund: (o.refund_no || o.refund_amount || o.refund_reason) ? {
+      no: o.refund_no || '',
+      amount: Number(o.refund_amount) || 0,
+      reason: o.refund_reason || '',
+      message: o.refund_message || '',
+      applyTime: o.refund_apply_time || '',
+      time: o.refund_time || ''
+    } : null,
     deliveryInfo: null
   }
 }
@@ -267,6 +277,98 @@ router.post('/:id/cancel', async (req, res) => {
     res.json({ ok: true })
   } catch (e) {
     res.status(500).json({ error: String(e.message || e) })
+  }
+})
+
+// ==================== 申请退款（用户端唯一入口） ====================
+// 设计要点（每条都对应一次真实踩坑）：
+//  ① **原子占位**：先把 status 从「可退」改成 refunding，只有 affectedRows>0 的那一次才真去调微信退款。
+//     连点/并发/刷新重试都只会产生一笔退款。
+//  ② **退款单号幂等**：out_refund_no 由订单号派生（见 pay.js refundOrderCore）→ 微信侧重复调用返回同一笔。
+//  ③ **如实落库**：SUCCESS→refunded / PROCESSING→refunding / 其他→refund_failed，并记下退款单号、金额、原因、时间。
+//     ⚠️ 历史上用户端直接调 /pay/refund，那接口只出账、不写 orders.status，
+//        前端又只在内存里把状态改成 refunding → 实际「钱已退、系统仍显示已支付、还能反复申请」。
+const REFUNDABLE_DB = ['paid', 'making', 'delivering', 'refund_failed']
+
+router.post('/:id/refund', async (req, res) => {
+  const userId = await resolveUser(req)
+  if (!userId) return res.status(401).json({ error: '请先登录后再申请退款', needLogin: true })
+  const id = String(req.params.id || '')
+  const b = (req.body && typeof req.body === 'object') ? req.body : {}
+  try {
+    const rows = await hq('SELECT * FROM orders WHERE id = ? AND user_id = ? LIMIT 1', [id, userId])
+    if (!rows.length) return res.status(404).json({ error: '订单不存在' })
+    const ord = rows[0]
+
+    if (!REFUNDABLE_DB.includes(ord.status)) {
+      const fs = FRONT_STATUS[ord.status] || ord.status
+      const text = STATUS_TEXT[fs] || ord.status
+      const msg = (fs === 'refunding' || fs === 'refunded') ? '该订单已在退款处理中' : ('当前状态不可申请退款（' + text + '）')
+      return res.status(409).json({ error: msg, status: fs, statusText: text })
+    }
+
+    const total = Math.round(Number(ord.total_price) || 0)
+    const wantFen = Math.round(Number(b.amountFen) || 0) || total
+    if (!(wantFen > 0) || wantFen > total) {
+      return res.status(400).json({ error: '退款金额不合法（应为 1 ~ ' + total + ' 分）' })
+    }
+
+    // —— ① 原子占位：改成功的那一次才继续往下走 ——
+    const lock = await hq(
+      `UPDATE orders
+          SET status = 'refunding', refund_reason = ?, refund_amount = ?,
+              refund_apply_time = NOW(), refund_updated_at = NOW(),
+              refund_message = '已提交，退款处理中'
+        WHERE id = ? AND user_id = ? AND status IN ('paid','making','delivering','refund_failed')`,
+      [String(b.reason || '用户申请退款').slice(0, 255), wantFen, id, userId]
+    )
+    if (!lock.affectedRows) {
+      return res.status(409).json({ error: '订单状态已变化，请刷新后重试', status: 'refunding', statusText: '退款中' })
+    }
+
+    // —— 占位成功即取消待分账：订单一旦进入退款流程就不允许再分账 ——
+    //    （已分账成功/处理中的由 pay.js 的 ensureReturnedBeforeRefund 负责先回退资金）
+    await hq("UPDATE orders SET ps_state='cancelled', ps_updated_at=NOW() WHERE id=? AND ps_state='pending'", [id])
+
+    // —— ② 占位成功才真正发起微信退款 ——
+    let r
+    try {
+      r = await refundOrderCore(id, {
+        reason: String(b.reason || '用户申请退款'),
+        amountFen: wantFen,
+        shopId: ord.shop_id
+      })
+    } catch (e) {
+      const msg = String((e && e.message) || e).slice(0, 255)
+      console.error('[orders] 退款失败 order=%s：%s', id, msg)
+      await hq(
+        "UPDATE orders SET status = 'refund_failed', refund_message = ?, refund_updated_at = NOW() WHERE id = ?",
+        ['退款失败：' + msg, id]
+      )
+      return res.status(502).json({ error: '退款失败：' + msg, status: 'refund_failed', statusText: '退款失败' })
+    }
+
+    // —— ③ 按微信返回的真实状态落库 ——
+    const wx = String(r.wxStatus || '').toUpperCase()
+    const finalDb = wx === 'SUCCESS' ? 'refunded' : (wx === 'PROCESSING' ? 'refunding' : 'refund_failed')
+    const fs = FRONT_STATUS[finalDb]
+    await hq(
+      `UPDATE orders
+          SET status = ?, refund_no = ?, refund_amount = ?, refund_message = ?,
+              refund_time = ${finalDb === 'refunded' ? 'NOW()' : 'NULL'},
+              refund_updated_at = NOW()
+        WHERE id = ?`,
+      [finalDb, r.refundNo, r.amountFen, '微信退款状态：' + (wx || '未知'), id]
+    )
+    console.log('[orders] 退款 order=%s 微信=%s → 订单=%s 退款号=%s 金额=%d分',
+      id, wx || '未知', finalDb, r.refundNo, r.amountFen)
+    return res.json({
+      ok: true, status: fs, statusText: STATUS_TEXT[fs] || finalDb,
+      refundNo: r.refundNo, amountFen: r.amountFen, wxStatus: wx
+    })
+  } catch (e) {
+    console.error('[orders] 申请退款异常：', e && e.message)
+    res.status(500).json({ error: String((e && e.message) || e) })
   }
 })
 

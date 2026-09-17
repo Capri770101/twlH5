@@ -78,12 +78,12 @@ async function submit() {
   if (!props.order || !reason.value || submitting.value) return
   submitting.value = true
   try {
-    await refundOrder(props.order.id, {
+    // 返回结果里带服务端落定的状态（refunded/refunding/refund_failed），交给调用方刷新用
+    const r = await refundOrder(props.order.id, {
       reason: reason.value,
-      amountFen: props.order.totalPrice,
-      shopId: props.order.shopId || 'default'
+      amountFen: props.order.totalPrice
     })
-    emit('success', props.order)
+    emit('success', r || null)
     emit('update:visible', false)
     reason.value = ''
     remark.value = ''
