@@ -62,6 +62,16 @@
     <div v-if="showPicker" class="sheet-mask" @click="showPicker = false"></div>
     <div v-if="showPicker" class="sheet" @click.stop>
       <div class="sheet-title">选择头像</div>
+
+      <!-- 从相册 / 本地文件上传（手机端会弹出「拍照 / 从相册选择」供用户选）-->
+      <button class="upload-btn" :disabled="uploading" @click="pickFile">
+        <span class="up-icon">🖼️</span>
+        <span>{{ uploading ? '图片上传中…' : '从相册或本地选择图片' }}</span>
+      </button>
+      <input ref="fileEl" class="file-input" type="file" accept="image/*" @change="onFile" />
+      <p class="up-tip">支持 jpg / png / webp，会自动裁剪成正方形并压缩</p>
+
+      <div class="sheet-title sheet-title-sub">或选择预设 / 粘贴链接</div>
       <div class="emoji-grid">
         <button
           v-for="a in PRESET_AVATARS"
@@ -90,6 +100,7 @@ import { ref, computed } from 'vue'
 import NavBar from '@/components/NavBar.vue'
 import store, { updateUserInfo } from '@/store'
 import { toast } from '@/utils/toast'
+import { uploadAvatar, updateProfile } from '@/mock/api'
 
 const user = computed(() => store.userInfo || {})
 const nickname = ref(user.value.nickname || '')
@@ -105,8 +116,9 @@ const PRESET_AVATARS = ['🌸', '🌻', '💐', '🌹', '🌷', '🌼', '💮', 
 const showPicker = ref(false)
 const urlInput = ref('')
 
+// 头像可能是「上传后的相对路径」（/api/uploads/…）或第三方绝对 URL
 function isImageUrl(s) {
-  return /^https?:\/\//.test(s || '')
+  return /^(https?:\/\/|\/)/.test(s || '')
 }
 
 function pickAvatar(a) {
@@ -116,17 +128,85 @@ function pickAvatar(a) {
 
 function applyUrl() {
   const u = urlInput.value.trim()
-  if (!isImageUrl(u)) { toast('请输入以 http(s):// 开头的图片链接'); return }
+  if (!/^https?:\/\//.test(u)) { toast('请输入以 http(s):// 开头的图片链接'); return }
   avatar.value = u
   urlInput.value = ''
   showPicker.value = false
 }
 
-function onSave() {
+// ===== 头像上传（相册 / 本地文件）=====
+const fileEl = ref(null)
+const uploading = ref(false)
+
+function pickFile() {
+  if (uploading.value) return
+  if (fileEl.value) fileEl.value.click()
+}
+
+/** 选图 → canvas 压成 512×512 正方形 JPEG → 上传 → 立即生效 */
+async function onFile(ev) {
+  const input = ev && ev.target
+  const f = (input && input.files && input.files[0]) || null
+  if (input) input.value = '' // 置空，允许连续选同一张图
+  if (!f) return
+  if (!/^image\//.test(f.type || '')) { toast('请选择图片文件'); return }
+  if (f.size > 12 * 1024 * 1024) { toast('图片过大，请选择 12MB 以内的图片'); return }
+  uploading.value = true
+  try {
+    const dataUrl = await compressImage(f)
+    const r = await uploadAvatar(dataUrl)
+    avatar.value = r.url
+    updateUserInfo({ avatar: r.url }) // 后端已落库，本地立即生效
+    showPicker.value = false
+    toast('头像已更新')
+  } catch (e) {
+    toast((e && e.message) || '头像上传失败，请重试')
+  } finally {
+    uploading.value = false
+  }
+}
+
+/** canvas 压缩：居中裁剪成正方形 → 限制到 size → JPEG，避免几 MB 原图直传 */
+function compressImage(file, size = 512, quality = 0.86) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file)
+    const img = new Image()
+    img.onload = () => {
+      try {
+        const w = img.naturalWidth || img.width
+        const h = img.naturalHeight || img.height
+        const side = Math.min(w, h)
+        if (!side) throw new Error('图片尺寸异常')
+        const out = Math.min(size, side)
+        const cv = document.createElement('canvas')
+        cv.width = out
+        cv.height = out
+        const ctx = cv.getContext('2d')
+        ctx.drawImage(img, (w - side) / 2, (h - side) / 2, side, side, 0, 0, out, out)
+        URL.revokeObjectURL(url)
+        resolve(cv.toDataURL('image/jpeg', quality))
+      } catch (e) {
+        URL.revokeObjectURL(url)
+        reject(new Error('图片处理失败，请换一张'))
+      }
+    }
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('图片读取失败，请换一张')) }
+    img.src = url
+  })
+}
+
+async function onSave() {
   const n = nickname.value.trim()
   if (!n) { toast('昵称不能为空'); return }
+  // 本地先生效（离线也不丢），再同步服务端；同步失败会明确告知，不静默假装成功。
+  // 历史行为：这里**只写 localStorage**，服务器完全不知道 → 换设备/清缓存即丢。
   updateUserInfo({ nickname: n, gender: gender.value, avatar: avatar.value })
-  toast('已保存')
+  try {
+    await updateProfile({ nickname: n, gender: gender.value, avatar: avatar.value })
+    toast('已保存')
+  } catch (e) {
+    toast('已保存到本机，但同步服务器失败：' + ((e && e.message) || '未知错误'))
+  }
 }
 
 </script>
@@ -278,6 +358,40 @@ function onSave() {
   color: var(--text-primary);
   text-align: center;
   margin-bottom: rpx(24);
+}
+.sheet-title-sub {
+  margin-top: rpx(28);
+  font-size: rpx(24);
+  font-weight: 600;
+  color: var(--text-light);
+}
+/* 上传头像按钮 */
+.upload-btn {
+  width: 100%;
+  height: rpx(92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: rpx(12);
+  border: rpx(2) dashed var(--primary);
+  border-radius: var(--radius-md);
+  background: var(--bg-warm, #fff8f5);
+  color: var(--primary);
+  font-size: rpx(28);
+  font-weight: 600;
+  cursor: pointer;
+  transition: 0.2s;
+  &:active { opacity: 0.75; }
+  &:disabled { opacity: 0.6; }
+}
+.up-icon { font-size: rpx(32); }
+.file-input { display: none; }
+.up-tip {
+  margin: rpx(12) 0 0;
+  font-size: rpx(22);
+  color: var(--text-light);
+  text-align: center;
+  line-height: 1.5;
 }
 .emoji-grid {
   display: grid;

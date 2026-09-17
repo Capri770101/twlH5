@@ -150,8 +150,9 @@ function maskPhone(p) {
   return String(p).replace(/(\d{3})\d{4}(\d{4})/, '$1****$2')
 }
 
+// 头像可能是「上传后的相对路径」（/api/uploads/…）或第三方绝对 URL
 function isImageUrl(s) {
-  return /^https?:\/\//.test(s || '')
+  return /^(https?:\/\/|\/)/.test(s || '')
 }
 
 function onLogout() {

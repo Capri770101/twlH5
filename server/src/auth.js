@@ -5,8 +5,11 @@
 //     订单/地址 user_id 迁移、openid/phone 唯一键转移、资料空缺补全、孤儿行删除。
 // 鉴权：所有入口统一签发 JWT（server/src/token.js，HS256 零依赖），兼容旧客端 guest_id 原文。
 import express from 'express'
+import fs from 'node:fs'
+import path from 'node:path'
+import crypto from 'node:crypto'
 import { hq, withTx } from './h5db.js'
-import { signToken, verifyToken } from './token.js'
+import { signToken, verifyToken, resolveUser } from './token.js'
 import { ensureSmsTable, sendCode, consumeCode, smsMode, validPhone } from './sms.js'
 import { hashPassword, verifyPassword, validUsername, validPassword } from './password.js'
 
@@ -55,6 +58,7 @@ function publicUser(u) {
     id: String(u.id),
     nickname: u.nickname || (u.phone ? '花友' + String(u.phone).slice(-4) : '微信用户'),
     avatar: u.avatar || '',
+    gender: (u.gender == null || u.gender === '') ? 0 : (Number(u.gender) || 0),
     phone: u.phone || '',
     openid: u.openid || '',
     unionid: u.unionid || '',
@@ -537,6 +541,94 @@ router.get('/pc-status', async (req, res) => {
   } catch (e) {
     console.error('[auth/pc-status] 失败:', e && (e.message || e))
     res.status(500).json({ error: '票据状态查询失败' })
+  }
+})
+
+// ==================== 个人资料（昵称 / 性别 / 头像） ====================
+// ⚠️ 补历史缺口：前端「保存修改」过去只写 localStorage，**服务器完全不知道**，
+//    换设备 / 清缓存即丢失。这里补上真正的落库接口。
+
+// POST /api/auth/profile { nickname?, gender?, avatar? } → { ok, user }
+router.post('/profile', async (req, res) => {
+  let u
+  try { u = await resolveUser(req) } catch (e) { /* 无效 token 视为未登录 */ }
+  if (!u) return res.status(401).json({ error: '请先登录后再修改资料', needLogin: true })
+
+  const b = (req.body && typeof req.body === 'object') ? req.body : {}
+  const sets = []
+  const params = []
+  if (b.nickname !== undefined) {
+    const n = String(b.nickname || '').trim().slice(0, 32)
+    if (!n) return res.status(400).json({ error: '昵称不能为空' })
+    sets.push('nickname = ?'); params.push(n)
+  }
+  if (b.gender !== undefined) {
+    // users.gender 是 varchar(8)：统一存 '0'/'1'/'2'
+    const g = String(Number(b.gender) || 0).slice(0, 8)
+    sets.push('gender = ?'); params.push(g)
+  }
+  if (b.avatar !== undefined) {
+    sets.push('avatar = ?'); params.push(String(b.avatar || '').slice(0, 500))
+  }
+  if (!sets.length) return res.status(400).json({ error: '没有要更新的字段' })
+
+  try {
+    params.push(u.id)
+    await hq(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`, params)
+    const rows = await hq('SELECT * FROM users WHERE id = ? LIMIT 1', [u.id])
+    return res.json({ ok: true, user: rows.length ? publicUser(rows[0]) : publicUser(u) })
+  } catch (e) {
+    console.error('[auth] 资料更新失败：', e && e.message)
+    return res.status(500).json({ error: '资料保存失败：' + (e && e.message) })
+  }
+})
+
+// ---------- 头像上传 ----------
+// 前端先用 canvas 压成 512×512 JPEG 再以 dataURL 提交 → 后端**零依赖**（不引 multer/sharp）。
+// 存盘后直接更新 users.avatar，返回可公开访问的 URL（经 nginx /api/ 反代到本服务）。
+const UPLOAD_ROOT = process.env.UPLOAD_DIR || '/opt/twlh5-api/uploads'
+const AVATAR_MAX_BYTES = 3 * 1024 * 1024
+const IMG_EXT = { jpeg: 'jpg', jpg: 'jpg', png: 'png', webp: 'webp' }
+
+// POST /api/auth/avatar { dataUrl } → { ok, url }
+// ⚠️ body 可达数 MB，超出 index.js 里全局 100kb 的 json 限制，
+//    故该路径在全局中间件里被排除，由这里自带的 4mb 解析器处理。
+router.post('/avatar', express.json({ limit: '4mb' }), async (req, res) => {
+  let u
+  try { u = await resolveUser(req) } catch (e) { /* ignore */ }
+  if (!u) return res.status(401).json({ error: '请先登录后再更换头像', needLogin: true })
+
+  const dataUrl = String((req.body && req.body.dataUrl) || '')
+  const m = dataUrl.match(/^data:image\/([a-zA-Z0-9.+-]+);base64,([A-Za-z0-9+/=]+)$/)
+  if (!m) return res.status(400).json({ error: '图片格式不支持（请选择 jpg / png / webp 图片）' })
+  const ext = IMG_EXT[String(m[1]).toLowerCase()]
+  if (!ext) return res.status(400).json({ error: '图片格式不支持（请选择 jpg / png / webp 图片）' })
+
+  let buf
+  try { buf = Buffer.from(m[2], 'base64') } catch (e) { buf = null }
+  if (!buf || !buf.length) return res.status(400).json({ error: '图片内容为空' })
+  if (buf.length > AVATAR_MAX_BYTES) {
+    return res.status(413).json({ error: '图片过大（请选择较小的图片）' })
+  }
+
+  try {
+    const dir = path.join(UPLOAD_ROOT, 'users', 'u' + u.id)
+    fs.mkdirSync(dir, { recursive: true })
+    const name = 'avatar-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex') + '.' + ext
+    fs.writeFileSync(path.join(dir, name), buf)
+    const url = '/api/uploads/users/u' + u.id + '/' + name
+    await hq('UPDATE users SET avatar = ? WHERE id = ?', [url, u.id])
+    console.log('[auth] 头像已更新 user=%s %dKB → %s', u.id, Math.round(buf.length / 1024), url)
+    // 只保留最新一张，避免磁盘无限增长（清理失败不影响主流程）
+    try {
+      for (const f of fs.readdirSync(dir)) {
+        if (f !== name && f.startsWith('avatar-')) fs.unlinkSync(path.join(dir, f))
+      }
+    } catch (e) { /* ignore */ }
+    return res.json({ ok: true, url })
+  } catch (e) {
+    console.error('[auth] 头像保存失败：', e && e.message)
+    return res.status(500).json({ error: '头像保存失败，请稍后重试' })
   }
 })
 

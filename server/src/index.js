@@ -18,8 +18,24 @@ const app = express()
 app.use(cors())
 // 微信支付回调需「原始 body」验签：/api/pay/notify 必须跳过 JSON 解析，交给下游 express.raw，
 // 否则 express.json 先消费请求流 → raw 恒空 → 验签必失败（回调永远进不来）。
+// /api/auth/avatar 同理：头像 dataURL 可达数 MB，超过全局 100kb 限制，
+// 交给该路由自带的 4mb 解析器。
 const jsonParser = express.json()
-app.use((req, res, next) => (req.path === '/api/pay/notify' ? next() : jsonParser(req, res, next)))
+app.use((req, res, next) => {
+  if (req.path === '/api/pay/notify') return next()
+  if (req.path === '/api/auth/avatar') return next()
+  jsonParser(req, res, next)
+})
+
+// 用户上传的静态资源（头像等）：/api/uploads/** → 磁盘目录。
+// 走 /api 前缀是为了复用 nginx 既有的 /api/ 反代，无需再改 nginx 配置。
+const UPLOAD_ROOT = process.env.UPLOAD_DIR || '/opt/twlh5-api/uploads'
+app.use('/api/uploads', express.static(UPLOAD_ROOT, {
+  maxAge: '30d',
+  immutable: true,
+  index: false,
+  fallthrough: true
+}))
 
 // 读数据源：api=同事业务 API（默认，推荐）/ mysql=直连 flower_shop（旧方案，白名单已不会开）
 const READ_SOURCE = (process.env.READ_SOURCE || 'api').toLowerCase() === 'mysql' ? 'mysql' : 'api'

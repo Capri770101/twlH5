@@ -919,6 +919,25 @@ const SCENE_PRESETS = {
 }
 
 // 从智能体响应里兼容多种字段名提取商品数组
+// ===== 个人资料（昵称 / 性别 / 头像）=====
+// ⚠️ 过去「保存修改」只写 localStorage，**服务器完全不知道**（换设备/清缓存即丢）。
+//    这两个接口把它真正落库。
+/** 上传头像：dataUrl 由前端 canvas 压缩后生成（512×512 JPEG），后端零依赖解码存盘 */
+export async function uploadAvatar(dataUrl) {
+  const a = await ensureGuestAuth()
+  if (a.offline) throw new Error('网络不可用，头像未上传')
+  const r = await realPost('/auth/avatar', { dataUrl }, a.token)
+  if (!r || !r.url) throw new Error('头像上传失败')
+  return r
+}
+
+/** 更新个人资料（昵称/性别/头像）→ { ok, user }；离线时返回 offline 标志，由调用方兜底 */
+export async function updateProfile(patch) {
+  const a = await ensureGuestAuth()
+  if (a.offline) return { ok: false, offline: true, user: null }
+  return await realPost('/auth/profile', patch || {}, a.token)
+}
+
 export function extractAgentProducts(payload) {
   const sources = [
     payload && payload.products,
