@@ -224,6 +224,7 @@ import {
   listAgentConversations, fetchAgentMessages
 } from '@/mock/api'
 import { extractDiyPlan, isDiyScene } from '@/utils/extractDiyPlan'
+import { mergeAgentMessages, slimMessage } from '@/utils/advisorHistory'
 import { toast } from '@/utils/toast'
 
 const router = useRouter()
@@ -270,6 +271,8 @@ function makeConversation() {
   }
 }
 
+// 落盘瘦身（slimMessage）与历史合并（mergeAgentMessages）见 @/utils/advisorHistory
+
 function saveConversations() {
   try {
     const data = conversations.value
@@ -278,13 +281,16 @@ function saveConversations() {
       .map(c => ({
         id: c.id,
         title: c.title,
-        messages: c.messages.slice(-40),
+        messages: (c.messages || []).slice(-40).map(slimMessage),
         sessionId: c.sessionId,
         agentMode: c.agentMode,
         updatedAt: c.updatedAt
       }))
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data.slice(0, 30)))
-  } catch (e) { /* 忽略存储异常 */ }
+  } catch (e) {
+    // 🔴 以前这里静默吞异常：超配额时写入失败，用户只看到「卡片没了」却毫无线索。
+    console.warn('[advisor] 会话本地保存失败（可能超出存储配额）：', e && e.name, e && e.message)
+  }
 }
 
 function loadConversations() {
@@ -627,6 +633,9 @@ function onSaveDiyPlan(plan) {
 }
 
 
+// 历史合并（mergeAgentMessages）见 @/utils/advisorHistory
+// 🔴 铁律：平台只存文本，**合并时绝不能整体覆盖本地消息**，否则卡片全丢。
+
 /**
  * 跨设备同步：智能体平台按账号（user_id）存会话，登录后把平台上的会话拉回来合并。
  * 命中规则用 sessionId（= 平台的 conversation id），因此可续聊、不会重复。
@@ -653,9 +662,11 @@ async function syncFromAgent() {
       const updatedAt = Date.parse((item && item.updated_at) || '') || Date.now()
       const exist = bySession.get(sid)
       if (exist) {
-        // 本机已有 → 用平台版本刷新（能拿到在另一台设备上的新回复）
+        // 本机已有 → **合并**：保留本地卡片，只把平台多出来的新消息补到末尾。
+        // （以前这里是 exist.messages = [{GREETING}, ...msgs] 整体覆盖 → 卡片全丢）
+        const merged = mergeAgentMessages(exist.messages, msgs)
         exist.title = item.title || exist.title
-        exist.messages = [{ ...GREETING }, ...msgs]
+        if (merged.appended) exist.messages = [{ ...GREETING }, ...merged.messages]
         exist.updatedAt = Math.max(exist.updatedAt || 0, updatedAt)
       } else {
         conversations.value.push({
