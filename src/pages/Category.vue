@@ -115,9 +115,7 @@
         <div class="flower-body">
           <span class="flower-name">{{ item.name }}</span>
           <span class="flower-subtitle text-ellipsis">{{ item.subtitle }}</span>
-          <div v-if="item.shopName" class="flower-shop-row">
-            <span class="flower-shop-name">{{ item.shopName }}</span>
-          </div>
+          <ShopTag :name="item.shopName" :city="item.shopCity" />
           <div class="flower-footer">
             <div class="flower-price-row">
               <span class="price price-md">{{ money(item.price) }}</span>
@@ -181,6 +179,7 @@ import { addToCart, money } from '@/store'
 import NavBar from '@/components/NavBar.vue'
 import StateBlock from '@/components/StateBlock.vue'
 import FlowerImage from '@/components/FlowerImage.vue'
+import ShopTag from '@/components/ShopTag.vue'
 import { toast } from '@/utils/toast'
 
 const route = useRoute()
@@ -495,13 +494,7 @@ onUnmounted(() => {
   font-size: var(--fs-caption);
   color: var(--text-light);
 }
-.flower-shop-row {
-  margin-top: rpx(4);
-}
-.flower-shop-name {
-  font-size: var(--fs-label);
-  color: #FF6B6B;
-}
+/* 店铺标识已抽成公共组件 <ShopTag>（Home / Search / Category 三处共用），此处不再重复定义 */
 .flower-footer {
   display: flex;
   align-items: center;

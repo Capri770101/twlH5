@@ -52,6 +52,7 @@
               <div class="flower-info">
                 <span class="flower-name">{{ item.name }}</span>
                 <span class="flower-subtitle">{{ item.subtitle }}</span>
+                <ShopTag :name="item.shopName" :city="item.shopCity" />
                 <div class="flower-price-row">
                   <span class="flower-price">¥{{ yuan(item.priceText) }}</span>
                   <span v-if="item.showOriginal" class="flower-original-price">¥{{ item.originalText }}</span>
@@ -99,6 +100,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { searchAll } from '@/mock/api'
 import FlowerImage from '@/components/FlowerImage.vue'
+import ShopTag from '@/components/ShopTag.vue'
 import { toast } from '@/utils/toast'
 import { yuan } from '@/store'
 
