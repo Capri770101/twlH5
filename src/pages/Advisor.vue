@@ -120,6 +120,7 @@
               :key="ci"
               :card="c"
               :msg-image="m.image || ''"
+              :msg-image-status="m.imageStatus || ''"
               @buy="onCardBuy"
               @send="sendOption"
               @pay="onCardPay"
@@ -679,6 +680,15 @@ function attachDiyPlan(msg) {
   try { plan = extractDiyPlan(msg.text) } catch (e) { plan = null }
   if (!plan) return
   if (!msg.cards) msg.cards = []
+  // 🔴 生图任务信息（task_id / poll）挂在**同一消息内 plan_card 的 data 顶层**，
+  //    而这张兜底卡是另一个对象，不借用的话它的 hasTask 恒为 false ——
+  //    封面会一直显示静态「定制花束」，既不提示"生成中"，也让人以为图不会来
+  //    （用户截图里那张正是这个状态）。
+  const taskSrc = (msg.cards || []).find(c => c && c.data && (c.data.task_id || c.data.poll))
+  if (taskSrc) {
+    plan.task_id = plan.task_id || taskSrc.data.task_id
+    plan.poll = plan.poll || taskSrc.data.poll
+  }
   msg.cards.push({ ui: 'diy_plan_card', data: plan })
   scrollToBottom()
 }

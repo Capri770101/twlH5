@@ -12,9 +12,9 @@
         @error="imgBroken = true"
       />
       <div v-else class="diy-cover-ph">
-        <div v-if="d.hasTask && !imgBroken" class="shimmer"></div>
-        <span class="ph-emoji" v-if="!d.hasTask || imgBroken">💐</span>
-        <span class="ph-text">{{ imgBroken ? '效果图加载失败' : (d.hasTask ? '效果图生成中…' : '定制花束') }}</span>
+        <div v-if="pending && !imgBroken" class="shimmer"></div>
+        <span class="ph-emoji" v-if="!pending || imgBroken">💐</span>
+        <span class="ph-text">{{ imgBroken ? '效果图加载失败' : (pending ? '效果图生成中…' : '定制花束') }}</span>
       </div>
       <span v-if="cover" class="cover-cap">效果图 · AI 生成</span>
     </div>
@@ -142,7 +142,10 @@ const props = defineProps({
   /** 外层 card.data（平台的 task_id / poll 挂在 plan_card 顶层） */
   cardTop: { type: Object, default: () => ({}) },
   /** 由 Advisor.vue 轮询后注入的效果图 URL（优先于 plan 自带字段） */
-  image: { type: String, default: '' }
+  image: { type: String, default: '' },
+  /** 所属消息的生图状态（processing/done/failed）。
+   *  兜底合成的卡自身没有 task_id，靠它也能正确显示「生成中」，不至于空着让人以为图不会来。 */
+  imageStatus: { type: String, default: '' }
 })
 defineEmits(['save', 'send'])
 
@@ -167,6 +170,9 @@ const cover = computed(() => {
   if (imgBroken.value) return ''
   return absImg(props.image || d.value.coverImage)
 })
+
+/** 是否处于「正在等效果图」状态 —— 决定封面显示 shimmer + 「生成中…」 */
+const pending = computed(() => d.value.hasTask || props.imageStatus === 'processing')
 
 /* ── 复制 ── */
 const copyHint = ref('')

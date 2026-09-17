@@ -43,6 +43,7 @@
         :plan="d"
         :card-top="P"
         :image="msgImage"
+        :image-status="msgImageStatus"
         @save="$emit('save-diy-plan', $event)"
         @send="$emit('send', $event)"
       />
@@ -167,6 +168,7 @@
         :plan="diyPlan"
         :card-top="P"
         :image="msgImage"
+        :image-status="msgImageStatus"
         @save="$emit('save-diy-plan', $event)"
         @send="$emit('send', $event)"
       />
@@ -197,7 +199,9 @@ const props = defineProps({
   card: { type: Object, default: () => ({}) },
   /** 所属消息的效果图 URL（Advisor.vue 轮询得到）—— 直接透给 DIY 卡当封面。
    *  比「把图写进 card.data」更直接可靠：不依赖注入时序，也不会因落盘截断而丢。 */
-  msgImage: { type: String, default: '' }
+  msgImage: { type: String, default: '' },
+  /** 所属消息的生图状态，透给 DIY 卡用于显示「生成中…」 */
+  msgImageStatus: { type: String, default: '' }
 })
 defineEmits(['buy', 'send', 'pay', 'order', 'view-order', 'save-diy-plan', 'go-shop', 'go-detail'])
 
