@@ -28,6 +28,30 @@
       </div>
     </header>
 
+    <!-- 🔧 诊断面板（仅 URL 带 ?diag=1 时出现；正常访问看不到，不影响线上）
+         用途：把「消息 + 卡片」的真实数据结构直接摊在页面上，
+         排查「卡片拿不到效果图」这类问题时不必靠猜。 -->
+    <div v-if="diagOn" class="diag">
+      <div class="diag-h">DIAG · 消息 {{ messages.length }} 条 · 版本 e0d012b+</div>
+      <div v-for="(m, i) in messages" :key="'dg' + i" class="diag-m">
+        <div class="diag-r">
+          <b>#{{ i }} {{ m.role }}</b>
+          <span>text:{{ (m.text || '').length }}字</span>
+          <span>img:{{ m.image ? '有' : '无' }}</span>
+          <span>st:{{ m.imageStatus || '-' }}</span>
+          <span>poll:{{ m.poll || '-' }}</span>
+          <span>cards:{{ (m.cards || []).length }}</span>
+        </div>
+        <div v-for="(c, ci) in (m.cards || [])" :key="'dc' + ci" class="diag-c">
+          [{{ ci }}] ui={{ c.ui }} · keys={{ keysOf(c.data) }}
+          <br />cardTask={{ (c.data && c.data.task_id) || '-' }} cardPoll={{ (c.data && c.data.poll) || '-' }}
+          <template v-if="c.data && c.data.plans">
+            <br />plans={{ c.data.plans.length }} · diyCount={{ diyCount(c.data.plans) }}
+          </template>
+        </div>
+      </div>
+    </div>
+
     <!-- 对话管理抽屉 -->
     <div class="conv-mask" v-if="drawerOpen" @click="drawerOpen = false"></div>
     <aside class="conv-drawer" :class="{ open: drawerOpen }">
@@ -897,7 +921,13 @@ async function syncFromAgent() {
   }
 }
 
+/** 🔧 诊断开关：URL 带 ?diag=1 才渲染诊断面板（排查用，不影响正常用户） */
+const diagOn = ref(false)
+const keysOf = (o) => Object.keys(o || {}).join(',')
+const diyCount = (arr) => (Array.isArray(arr) ? arr.filter(p => p && p.diy).length : 0)
+
 onMounted(() => {
+  diagOn.value = /[?&]diag=1/.test(location.search)
   loadConversations()
   scrollToBottom()
   syncFromAgent()
@@ -905,6 +935,35 @@ onMounted(() => {
 </script>
 
 <style scoped lang="scss">
+/* 🔧 诊断面板（仅 ?diag=1）—— 深色等宽小字，便于截图比对 */
+.diag {
+  flex: none;
+  max-height: 46vh;
+  overflow: auto;
+  padding: rpx(16) rpx(20);
+  background: #1e1c19;
+  color: #e8e2d6;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: rpx(19);
+  line-height: 1.55;
+  border-bottom: rpx(3) solid #a58449;
+  -webkit-overflow-scrolling: touch;
+}
+.diag-h { color: #c8ac79; margin-bottom: rpx(10); letter-spacing: 0.08em; }
+.diag-m {
+  margin-bottom: rpx(12);
+  padding-bottom: rpx(10);
+  border-bottom: 1rpx dashed rgba(255, 255, 255, 0.16);
+}
+.diag-r { display: flex; gap: rpx(14); flex-wrap: wrap; }
+.diag-r b { color: #fff; }
+.diag-c {
+  margin-top: rpx(6);
+  padding-left: rpx(12);
+  border-left: rpx(3) solid #a58449;
+  color: #d8cfae;
+  word-break: break-all;
+}
 /* ══════════════════════════════════════════════════════════════
    AI 花艺顾问 —— 「花艺标本册」风格（对齐 api.tiaowulan.com/demo）
    暖象牙纸底 · 墨绿主色 · 黄铜细线 · 衬线标题 + 无衬线正文
