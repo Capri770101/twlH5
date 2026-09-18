@@ -99,8 +99,8 @@ function serveStatic(req, res) {
 // 若要彻底关闭匿名可用，需产品层面改为「必须登录 H5 才转发 /agent/*」。
 const num = (v, d) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : d }
 const RL = {
-  tokenPerHour: num(process.env.AGENT_RL_TOKEN_PER_HOUR, 20),
-  chatPerHour: num(process.env.AGENT_RL_CHAT_PER_HOUR, 40),
+  tokenPerHour: num(process.env.AGENT_RL_TOKEN_PER_HOUR, 120),
+  chatPerHour: num(process.env.AGENT_RL_CHAT_PER_HOUR, 60),
   dailyTotal: num(process.env.AGENT_RL_DAILY_TOTAL, 3000),
   maxConcurrent: num(process.env.AGENT_RL_MAX_CONCURRENT, 6)
 }
@@ -114,6 +114,19 @@ function clientIp(req) {
   const xff = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim()
   return xff || (req.socket && req.socket.remoteAddress) || 'unknown'
 }
+
+/**
+ * 只有**真正花钱**的请求才计数。
+ * 🔴 第一版把 `^/agent/(chat|tasks)` 一起算进 chat 桶，结果**效果图轮询（每 3.5s 一次 /tasks/{id}）
+ *    几十秒就把 60/小时的额度打满** → 正常用户直接 429 → 前端回退「演示模式」。
+ *    轮询是廉价 GET、不触发模型，不在这里限流。
+ */
+function bucketOf(url) {
+  if (url.startsWith('/agent/auth/token')) return 'token'
+  if (url.startsWith('/agent/chat/') || url === '/agent/chat') return 'chat'
+  return null // /tasks/*、/conversations*、/ui-contract 等：不计流
+}
+
 function rlHit(ip, kind) {
   const now = Date.now()
   let b = rlBuckets.get(ip)
@@ -138,10 +151,11 @@ setInterval(rlSweep, 10 * 60 * 1000).unref()
 
 function proxyAgent(req, res) {
   const ip = clientIp(req)
-  if (req.url.startsWith('/agent/auth/token') && !rlHit(ip, 'token')) {
+  const bucket = bucketOf(req.url)
+  if (bucket === 'token' && !rlHit(ip, 'token')) {
     return tooMany(res, '请求过于频繁，请稍后再试')
   }
-  if (/^\/agent\/(chat|tasks)/.test(req.url)) {
+  if (bucket === 'chat') {
     if (!rlHit(ip, 'chat')) return tooMany(res, '对话请求过于频繁，请稍后再试')
     if (agentInFlight >= RL.maxConcurrent) return tooMany(res, '当前咨询较多，请稍后再试')
     const today = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10)

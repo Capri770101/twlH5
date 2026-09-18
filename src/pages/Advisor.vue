@@ -291,7 +291,7 @@ import store, { addToCart, saveDiyPlan, yuan } from '@/store'
 import AdvisorCards from '@/components/AdvisorCards.vue'
 import {
   chatWithAdvisor, streamAdvisorChat, pollAgentTask, normalizeAgentAssetUrl,
-  ADVISOR_PRESETS, AGENT_CONFIG, listAgentConversations, fetchAgentMessages
+  isAgentRateLimited, ADVISOR_PRESETS, AGENT_CONFIG, listAgentConversations, fetchAgentMessages
 } from '@/mock/api'
 import { extractDiyPlan, isDiyScene } from '@/utils/extractDiyPlan'
 import { mergeAgentMessages, slimMessage, extractImageTaskId } from '@/utils/advisorHistory'
@@ -561,27 +561,52 @@ async function sendMessage() {
     if (r && (r.ok || r.gotAny)) {
       agentMode.value = 'real'
       if (r.sessionId) sessionId.value = r.sessionId
+    } else if (r && r.rateLimited) {
+      // 🔴 限流 / 服务繁忙：**不许回退 mock**（否则会显示假回复并把顶部切成「演示模式」，
+      //    用户看到的是"功能坏了"）。如实提示，模式保持不变。
+      agentMode.value = 'real'
+      set({ text: cur().text || '当前咨询的人有点多，稍等一会儿再问我吧。' })
+      toast('当前咨询较多，请稍后再试')
     } else if (!stopped.value) {
       // 流式不可用（无 key / 不支持 / 网络问题）→ 回退整段对话（含 mock 演示）
-      const result = await chatWithAdvisor({
-        message: text,
-        shopId: 'default',
-        sessionId: sessionId.value
-      })
-      agentMode.value = result.mock ? 'demo' : 'real'
-      sessionId.value = result.sessionId || sessionId.value
-      set({
-        text: result.reply,
-        plans: result.plans || [],
-        products: result.products || [],
-        options: result.options || [],
-        poll: result.poll || null
-      })
-      const poll = cur().poll
-      if (poll) startImagePoll(cur()) // 统一走同一条轮询逻辑（含状态/失败处理）
+      let result = null
+      try {
+        result = await chatWithAdvisor({
+          message: text,
+          shopId: 'default',
+          sessionId: sessionId.value
+        })
+      } catch (e) {
+        if (isAgentRateLimited(e)) {
+          agentMode.value = 'real'
+          set({ text: cur().text || '当前咨询的人有点多，稍等一会儿再问我吧。' })
+          toast('当前咨询较多，请稍后再试')
+        } else {
+          throw e
+        }
+      }
+      if (result) {
+        agentMode.value = result.mock ? 'demo' : 'real'
+        sessionId.value = result.sessionId || sessionId.value
+        set({
+          text: result.reply,
+          plans: result.plans || [],
+          products: result.products || [],
+          options: result.options || [],
+          poll: result.poll || null
+        })
+        const poll = cur().poll
+        if (poll) startImagePoll(cur()) // 统一走同一条轮询逻辑（含状态/失败处理）
+      }
     }
   } catch (e) {
-    set({ text: cur().text || '抱歉，刚刚网络有点小波动，换个说法再试试？' })
+    if (isAgentRateLimited(e)) {
+      agentMode.value = 'real'
+      set({ text: cur().text || '当前咨询的人有点多，稍等一会儿再问我吧。' })
+      toast('当前咨询较多，请稍后再试')
+    } else {
+      set({ text: cur().text || '抱歉，刚刚网络有点小波动，换个说法再试试？' })
+    }
   } finally {
     stopThinking()
     set({ streaming: false })

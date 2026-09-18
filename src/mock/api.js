@@ -1112,6 +1112,23 @@ let agentUserId = ''
 let agentTokenUid = '' // 该 token 对应哪个 external_user_id（身份变了必须重新签发）
 
 // 1) 用平台 Key 换 Bearer token（带内存+过期缓存）
+/**
+ * 限流 / 服务繁忙识别。
+ * 🔴 这类失败**绝不能**回退到 mock 演示数据 —— 那会让页面显示假回复并切到「演示模式」，
+ *    用户看起来就像"功能坏了"。必须如实提示「稍后再试」，模式保持原样。
+ */
+export function isAgentRateLimited(e) {
+  return !!e && (e.rateLimited === true || Number(e.status) === 429)
+}
+export async function agentHttpError(res, tag) {
+  let detail = ''
+  try { detail = String(((await res.json()) || {}).detail || '') } catch (e) { /* 非 JSON 响应 */ }
+  const err = new Error(tag + ' ' + res.status + (detail ? '：' + detail : ''))
+  err.status = res.status
+  if (res.status === 429) err.rateLimited = true
+  return err
+}
+
 async function ensureAgentToken() {
   const ext = getExternalUid()
   // 身份变化（例如刚从匿名转为登录）→ 旧 token 属于另一个用户，必须重签，
@@ -1122,7 +1139,7 @@ async function ensureAgentToken() {
     headers: { 'Content-Type': 'application/json', ...agentKeyHeader() },
     body: JSON.stringify({ external_user_id: ext })
   })
-  if (!res.ok) throw new Error('agent token ' + res.status)
+  if (!res.ok) throw await agentHttpError(res, 'agent token')
   const d = await res.json()
   agentToken = d.access_token
   agentUserId = d.user_id || ''
@@ -1260,12 +1277,19 @@ export async function chatWithAdvisor({ message, shopId = 'default', sessionId =
         signal: ctrl.signal
       })
       clearTimeout(timer)
-      if (!res.ok) throw new Error('chat ' + res.status)
+      if (!res.ok) throw await agentHttpError(res, 'chat')
       const r = await res.json()
       const norm = normalizeAdvisorResponse(r, sessionId)
       norm.sessionId = norm.sessionId || sessionId
       return norm
     } catch (e) {
+      // 限流 / 服务繁忙：**不回退**（回退会显示假回复 + 切成「演示模式」，用户以为坏了）
+      if (isAgentRateLimited(e)) {
+        console.warn('[advisor] 被限流/服务繁忙：', e && e.message)
+        const err = new Error(e.message || '当前咨询较多，请稍后再试')
+        err.rateLimited = true
+        throw err
+      }
       // 跨域 / 网络 / 超时 / 401：回退 mock
       console.warn('[advisor] 真实智能体不可用，回退 mock：', e && e.message)
     }
@@ -1325,7 +1349,8 @@ export async function streamAdvisorChat({ message, shopId = 'default', sessionId
       }),
       signal: ctrl.signal
     })
-    if (!res.ok || !res.body) throw new Error('stream ' + res.status)
+    if (!res.ok) throw await agentHttpError(res, 'stream')
+    if (!res.body) throw new Error('stream: no body')
     const reader = res.body.getReader()
     const dec = new TextDecoder('utf-8')
     let buf = ''
@@ -1346,6 +1371,11 @@ export async function streamAdvisorChat({ message, shopId = 'default', sessionId
     }
     return { ok: true, gotAny, sessionId: finalSessionId }
   } catch (e) {
+    // 限流 / 服务繁忙：**不回退**，如实上报让调用方提示（回退会变成"演示模式"+假回复）
+    if (isAgentRateLimited(e)) {
+      console.warn('[advisor] 被限流/服务繁忙：', e && e.message)
+      return { ok: false, rateLimited: true, message: e && e.message, gotAny, sessionId: finalSessionId }
+    }
     console.warn('[advisor] 流式对话失败，回退普通对话：', e && e.message)
     return { ok: false, gotAny, sessionId: finalSessionId }
   } finally {
