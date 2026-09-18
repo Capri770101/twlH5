@@ -126,6 +126,11 @@
 
             <div v-if="m.text" class="say">{{ m.text }}<span v-if="m.streaming" class="caret"></span></div>
 
+            <!-- AI 生成内容标识（《人工智能生成合成内容标识办法》/ GB 45438-2025，平台随 done 下发）-->
+            <div v-if="m.role !== 'user' && m.aiGenerated" class="aigc-tag">
+              {{ m.disclosure || '本内容由 AI 生成，仅供参考' }}
+            </div>
+
             <!-- 流式状态：思考中 / 工具调用 -->
             <div v-if="m.streaming && !m.text" class="thinking-line">
               <span class="think-dots"><i></i><i></i><i></i></span>
@@ -505,13 +510,21 @@ async function sendMessage() {
       signal: abortCtl.value.signal,
       onEvent: ev => {
         if (!cur()) return
-        if (ev.event === 'text') {
+        // 平台 2026-09-18 起改为**真 token 流**：逐字推 `text_delta`；并新增 `text_rollback`
+        // （模型流式中途改成调工具 → 前面已推的文字作废，必须撤回，否则页面残留内部独白）。
+        // 🔴 平台只在「一次都没推过」时才退回整段 `text`，所以**必须**处理 `text_delta`，
+        //    否则用户会看到「完全没有文字、只有卡片」。
+        if (ev.event === 'text_delta' || ev.event === 'text') {
           const c = (ev.data && (ev.data.content || ev.data.text || ev.data.delta)) || ''
           if (c) {
             set({ text: cur().text + c })
             gotAny = true
             scrollToBottom()
           }
+        } else if (ev.event === 'text_rollback') {
+          // 撤回本次已推的文字（那段是模型内部独白，不该给用户看）
+          set({ text: '' })
+          scrollToBottom()
         } else if (ev.event === 'card') {
           const ui = (ev.data && ev.data.ui) || 'text'
           const data = (ev.data && ev.data.data) || {}
@@ -527,7 +540,14 @@ async function sendMessage() {
           if (name && !cur().tools.includes(name)) cur().tools.push(name)
           scrollToBottom()
         } else if (ev.event === 'done') {
-          if (ev.data && ev.data.session_id) sessionId.value = ev.data.session_id
+          const d = ev.data || {}
+          if (d.session_id) sessionId.value = d.session_id
+          // 🔴 `done.reply` 是**权威终稿**：平台在它上面跑过清理链（危险标签转义、独白替换、
+          //    卡片要点追加），而流式推的是模型原始输出。所以这里以 reply 为准覆盖已累加的文字。
+          if (typeof d.reply === 'string' && d.reply.trim()) set({ text: d.reply })
+          // AIGC 标识（GB 45438-2025）随 done 下发，落到消息上供界面展示
+          if (d.ai_generated != null) set({ aiGenerated: !!d.ai_generated })
+          if (d.content_disclosure) set({ disclosure: String(d.content_disclosure) })
           attachDiyPlan(cur())
           attachImageTaskFromText(cur())
         }
@@ -593,9 +613,17 @@ function stopGenerate() {
 // 方案卡两个按钮的语义必须可区分：
 //   加购（mode='cart'）→ 只进购物车，留在对话里继续挑（可凑单/一起结算）
 //   结算（mode='now'） → 进购物车并直接跳结算页，省一步
+// 统一的加购入口：入车失败（无 id / 无有效价格）必须**如实告知**，
+// 不能再像以前那样无条件 toast「已加入购物车」——那正是审计 P0-3 的现象。
+function addToCartOrWarn(payload, okMsg) {
+  if (addToCart(payload)) { toast(okMsg); return true }
+  toast('该方案暂无报价，无法直接下单，请先咨询商家')
+  return false
+}
+
 function onCardBuy({ item, mode }) {
   if (!item) return
-  addToCart({
+  const ok = addToCartOrWarn({
     id: item.id,
     name: item.name,
     subtitle: item.desc || '',
@@ -603,13 +631,8 @@ function onCardBuy({ item, mode }) {
     image: item.image || '',
     shopId: item.shopId || 'default',
     quantity: 1
-  })
-  if (mode === 'now') {
-    toast('已加入购物车，正在去结算')
-    setTimeout(() => router.push({ name: 'checkout' }), 280)
-  } else {
-    toast('已加入购物车，可以继续挑')
-  }
+  }, mode === 'now' ? '已加入购物车，正在去结算' : '已加入购物车，可以继续挑')
+  if (ok && mode === 'now') setTimeout(() => router.push({ name: 'checkout' }), 280)
 }
 
 // 订单卡：确认下单 → 把明细加进购物车并跳结算（有订单号则直接看订单）
@@ -621,16 +644,18 @@ function onCardOrder(order) {
   }
   const items = order.items || []
   if (!items.length) { toast('订单明细为空'); return }
+  let added = 0
   items.forEach(it => {
-    addToCart({
+    if (addToCart({
       id: 'agent_' + (it.name || 'flower'),
       name: it.name || '定制花束',
       price: Math.round((Number(it.price) || 0) * 100),
       image: '',
       shopId: 'default',
       quantity: it.qty || 1
-    })
+    })) added++
   })
+  if (!added) { toast('订单明细缺少报价，无法直接下单'); return }
   toast('已加入购物车，去结算')
   setTimeout(() => router.push({ name: 'checkout' }), 280)
 }
@@ -665,31 +690,31 @@ function goDetail(product) {
 
 function buy(product) {
   if (!product || !product.id) return
-  addToCart({
+  const ok = addToCartOrWarn({
     id: product.id,
     name: product.name,
     price: Math.round((product.price || 0) * 100),
     image: product.image || '',
     shopId: product.shopId || 'default',
     quantity: 1
-  })
-  toast('已加入购物车')
-  setTimeout(() => router.push({ name: 'checkout' }), 280)
+  }, '已加入购物车')
+  if (ok) setTimeout(() => router.push({ name: 'checkout' }), 280)
 }
 
 // DIY 方案加入购物车（自定义条目，价格已是「元」）
+// ⚠️ DIY 方案的 `price` 实测常为 null（真实价格只存在于 `estimated_price` 字符串，
+//    如「约 300 元」）→ 加购会被拒，这里如实提示，不再假报成功。
 function buyPlan(plan) {
   if (!plan || !plan.id) return
-  addToCart({
+  const ok = addToCartOrWarn({
     id: 'plan_' + plan.id,
     name: plan.name,
     price: Math.round((plan.price || 0) * 100),
     image: plan.image || '',
     shopId: plan.shopId || 'default',
     quantity: 1
-  })
-  toast('方案已加入购物车')
-  setTimeout(() => router.push({ name: 'checkout' }), 280)
+  }, '方案已加入购物车')
+  if (ok) setTimeout(() => router.push({ name: 'checkout' }), 280)
 }
 
 // DIY 场景兜底：平台调了 generate_diy_plan 但没 emit card 事件时，
@@ -1399,6 +1424,14 @@ onMounted(() => {
   font-size: rpx(28);
 }
 .tool-line { margin-top: rpx(14); font-size: rpx(22); color: var(--ink-3); }
+/* AI 生成内容标识（合规要求，随消息常驻，弱化处理但必须可见） */
+.aigc-tag {
+  margin-top: rpx(12);
+  font-size: rpx(20);
+  color: var(--ink-3);
+  letter-spacing: 0.04em;
+  opacity: 0.85;
+}
 .think-dots { display: inline-flex; gap: rpx(8); flex: none; }
 .think-dots i {
   width: rpx(10);

@@ -100,7 +100,9 @@ function fmtTime(ts) {
 }
 
 function onAdd(p) {
-  addToCart({
+  // ⚠️ DIY 方案的价格可能是空的（真实价只在 estimated_price 文本里）→ 加购会被拒。
+  //    以前这里无条件提示「已加入购物车」，0 元方案就这样进了车并跳到结算（审计 P0-3）。
+  const ok = addToCart({
     id: 'diy_' + p.id,
     name: p.name,
     subtitle: 'AI 定制方案',
@@ -110,7 +112,8 @@ function onAdd(p) {
     shopId: 'default',
     quantity: 1
   })
-  toast('已加入购物车')
+  if (ok) { toast('已加入购物车'); return }
+  toast('该方案暂无报价，无法直接下单，请先咨询商家')
 }
 
 function onRemove(p) {

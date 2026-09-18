@@ -105,7 +105,21 @@ function capByStock(qty, stock) {
   return (Number.isFinite(s) && s > 0) ? Math.min(qty, s) : qty
 }
 
+/**
+ * 加入购物车。
+ * 🔴 2026-09-18 外部审计 P0-3：原先对 `price` 毫无校验，于是「有商品 id 但价格为空」
+ *    的商品（典型是 AI 的 DIY 方案：`price` 为 null、真实价只在 `estimated_price`
+ *    字符串里）会以 **0 元**进购物车并跳转结算页，还提示"已加入购物车"。
+ *    → 这里硬性拒收：**没有 id 或价格 ≤ 0 一律不入车**，返回 false 由调用方提示。
+ *    （服务端另有权威定价校验会按库价重算，但前端不该把错误状态做出来。）
+ * @returns {boolean} 是否成功入车
+ */
 export function addToCart(product, quantity = 1) {
+  if (!product) return false
+  const id = String(product.id || '').trim()
+  if (!id) return false
+  const price = Math.round(Number(product.price) || 0)
+  if (!(price > 0)) return false
   const cart = state.cart
   const pShopId = product.shopId || state.shopId || ''
   const specId = product.specId || ''
@@ -123,7 +137,7 @@ export function addToCart(product, quantity = 1) {
       name: product.name || '',
       subtitle: product.subtitle || '',
       image: (product.images && product.images[0]) || product.image || '',
-      price: product.price || 0,
+      price,
       originalPrice: product.originalPrice || 0,
       stock: product.stock ?? null,
       quantity: capByStock(quantity, product.stock),
@@ -134,6 +148,7 @@ export function addToCart(product, quantity = 1) {
     })
   }
   persistCart()
+  return true
 }
 
 /** 加减数量；超过库存返回 false（调用方可提示「已达库存上限」） */

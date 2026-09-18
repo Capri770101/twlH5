@@ -54,11 +54,13 @@ export function toFlower(prod, opts) {
 export function toShop(raw) {
   const s = mapShopRow(raw || {})
   if (!raw) return s
-  // 保留对前端/支付有用的扩展字段
+  // 保留对前端有用的扩展字段
   s.city = String(raw.city || '')
   s.status = String(raw.status || '')
-  s.subMchId = String(raw.subMchId || '')
-  s.profitSharingRatio = Number(raw.profitSharingRatio) || 0
+  // 🔴 **绝不透出** `subMchId` / `profitSharingRatio`：
+  //    前者是微信子商户号，后者是平台与花店的分账比例（商业机密）。
+  //    前端完全用不到——子商户号由服务端 `submch.js` 直接查库解析，不依赖本对象。
+  //    2026-09-18 外部审计 P0-1：/api/shops 匿名即可取到 12 家的子商户号与分账比例。
   s.latitude = raw.latitude != null ? Number(raw.latitude) : undefined
   s.longitude = raw.longitude != null ? Number(raw.longitude) : undefined
   s.ipTitle = String(raw.ipTitle || '')

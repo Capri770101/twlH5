@@ -5,6 +5,11 @@ import { getReviewByOrder, getReviewsByProduct } from '@/store'
 // ===== 真实后端数据层（MySQL 经由 Node 后端 /api 代理）=====
 // 默认开启：优先调 /api，失败（后端未起 / DB 不可达 / 无权限）自动回退下方 mock，保证页面永远有数据
 const REAL_API_ENABLED = import.meta.env.VITE_USE_REAL_API !== 'false'
+// 🔴 生产构建**禁止静默回退演示数据**（2026-09-18 外部审计 P0-5）。
+//    假订单/假门店/假商品会被用户当成真的（且假图全是 404），比"页面空着"危险得多；
+//    支付更糟：回退会返回伪造的 weixin:// 支付链接，用户拉起一个报错的收银台。
+//    仅 dev，或显式 VITE_ALLOW_MOCK_FALLBACK=true 时保留兜底，方便无后端联调。
+const ALLOW_MOCK_FALLBACK = !!import.meta.env.DEV || import.meta.env.VITE_ALLOW_MOCK_FALLBACK === 'true'
 const API_BASE = import.meta.env.VITE_API_BASE || '/api'
 function authHeaders(token) {
   const t = token || localToken()
@@ -63,6 +68,7 @@ export async function payOrder({ shopId, outTradeNo, amountFen, description, ope
     try {
       return await realPost('/pay/order', { shopId, outTradeNo, amountFen, description, openid, tradeType })
     } catch (e) {
+      if (!ALLOW_MOCK_FALLBACK) throw e // /pay/order：生产不回退演示数据
       console.warn('[api] /pay/order 真实接口失败，回退 mock：', e && e.message)
     }
   }
@@ -70,11 +76,11 @@ export async function payOrder({ shopId, outTradeNo, amountFen, description, ope
   const inWeChat = typeof navigator !== 'undefined' && /micromessenger/i.test(navigator.userAgent)
   if (tradeType === 'NATIVE') {
     // PC 扫码支付：真实后端会额外返回 qrDataUrl（服务端生成二维码）；mock 只给 code_url
-    return { tradeType: 'NATIVE', code_url: 'weixin://wxpay/bizpayurl?pr=mock_' + outTradeNo, qrDataUrl: '' }
+    return { tradeType: 'NATIVE', code_url: 'mockpay://dev-only-not-payable/' + outTradeNo, qrDataUrl: '' }
   }
   if (tradeType === 'H5' || !inWeChat) {
     // 外部浏览器：返回 h5_url（mock 仅占位，实际由后端返回微信收银台链接）
-    return { tradeType: 'H5', h5_url: 'weixin://wxpay/bizpayurl?pr=mock_' + outTradeNo }
+    return { tradeType: 'H5', h5_url: 'mockpay://dev-only-not-payable/' + outTradeNo }
   }
   // 微信内：返回 JSAPI 调起参数（mock 签名为占位，仅演示流程）
   return {
@@ -82,7 +88,7 @@ export async function payOrder({ shopId, outTradeNo, amountFen, description, ope
     appId: 'wxMock',
     timeStamp: String(Math.floor(Date.now() / 1000)),
     nonceStr: 'mock' + Date.now(),
-    package: 'prepay_id=mock_' + outTradeNo,
+    package: 'prepay_id=dev-only-not-payable_' + outTradeNo,
     signType: 'RSA',
     paySign: 'mock'
   }
@@ -93,6 +99,7 @@ export async function queryPayOrder(outTradeNo, subMchid) {
     try {
       return await realApi(`/pay/query/${encodeURIComponent(outTradeNo)}`, { subMchid: subMchid || '' })
     } catch (e) {
+      if (!ALLOW_MOCK_FALLBACK) throw e // /pay/query：生产不回退演示数据
       console.warn('[api] /pay/query 失败，回退 mock：', e && e.message)
     }
   }
@@ -134,7 +141,7 @@ export function getHomeIndex() {
 
 async function getHomeIndexReal() {
   if (REAL_API_ENABLED) {
-    try { return await realApi('/home') } catch (e) { console.warn('[api] /home 真实接口失败，回退 mock：', e && e.message) }
+    try { return await realApi('/home') } catch (e) { if (!ALLOW_MOCK_FALLBACK) throw e; console.warn('[api] /home 真实接口失败，回退 mock：', e && e.message) }
   }
   const data = { ...mockData.homeData }
   data.recommendFlowers = mockData.enrichFlowerList(mockData.flowers.slice(0, 6))
@@ -149,7 +156,7 @@ async function getHomeIndexReal() {
 // ===== 花束详情 =====
 export async function getFlowerDetail(id) {
   if (REAL_API_ENABLED) {
-    try { return await realApi('/flowers/' + encodeURIComponent(id)) } catch (e) { console.warn('[api] /flowers/:id 真实接口失败，回退 mock：', e && e.message) }
+    try { return await realApi('/flowers/' + encodeURIComponent(id)) } catch (e) { if (!ALLOW_MOCK_FALLBACK) throw e; console.warn('[api] /flowers/:id 真实接口失败，回退 mock：', e && e.message) }
   }
   const flower = mockData.flowers.find(f => f.id === id)
   await delay()
@@ -182,7 +189,7 @@ export async function getFlowerDetail(id) {
 export function getCategories() {
   return cached('categories', 5 * 60 * 1000, async () => {
     if (REAL_API_ENABLED) {
-      try { return await realApi('/categories') } catch (e) { console.warn('[api] /categories 真实接口失败，回退 mock：', e && e.message) }
+      try { return await realApi('/categories') } catch (e) { if (!ALLOW_MOCK_FALLBACK) throw e; console.warn('[api] /categories 真实接口失败，回退 mock：', e && e.message) }
     }
     await delay(80)
     return mockData.categories
@@ -192,7 +199,7 @@ export function getCategories() {
 // ===== 花束列表（分类/排序/分页复用） =====
 export async function getFlowerList({ categoryId = '', sort = 'default', page = 1, pageSize = 10 } = {}) {
   if (REAL_API_ENABLED) {
-    try { return await realApi('/flowers', { categoryId, sort, page, pageSize }) } catch (e) { console.warn('[api] /flowers 真实接口失败，回退 mock：', e && e.message) }
+    try { return await realApi('/flowers', { categoryId, sort, page, pageSize }) } catch (e) { if (!ALLOW_MOCK_FALLBACK) throw e; console.warn('[api] /flowers 真实接口失败，回退 mock：', e && e.message) }
   }
   let list = [...mockData.flowers]
   if (categoryId) list = list.filter(f => f.categoryId === categoryId)
@@ -291,6 +298,7 @@ export async function getOrderList(status = 'all') {
         return (d.list || []).map(decorateOrder)
       }
     } catch (e) {
+      if (!ALLOW_MOCK_FALLBACK) throw e // /orders：生产不回退演示数据
       console.warn('[api] /orders 真实接口失败，回退 mock：', e && e.message)
     }
   }
@@ -317,6 +325,7 @@ export async function getOrderDetail(id) {
     } catch (e) {
       // 真实库里没有这笔单（如 mock 单号/他人订单）→ 返回 null，不混入 mock 数据
       if (/not found|404/i.test(String(e && e.message))) return null
+      if (!ALLOW_MOCK_FALLBACK) throw e // /orders/:id：生产不回退演示数据
       console.warn('[api] /orders/:id 真实接口失败，回退 mock：', e && e.message)
     }
   }
@@ -383,6 +392,7 @@ export async function createOrder(payload) {
         return { id: d.id, status: d.status || 'new' }
       }
     } catch (e) {
+      if (!ALLOW_MOCK_FALLBACK) throw e // /orders：生产不回退演示数据
       console.warn('[api] /orders 真实接口失败，回退 mock：', e && e.message)
     }
   }
@@ -496,7 +506,7 @@ function prepareShopTrustInfo(shop) {
 
 export async function getShopDetail(id) {
   if (REAL_API_ENABLED) {
-    try { return await realApi('/shops/' + encodeURIComponent(id)) } catch (e) { console.warn('[api] /shops/:id 真实接口失败，回退 mock：', e && e.message) }
+    try { return await realApi('/shops/' + encodeURIComponent(id)) } catch (e) { if (!ALLOW_MOCK_FALLBACK) throw e; console.warn('[api] /shops/:id 真实接口失败，回退 mock：', e && e.message) }
   }
   const shopRaw = mockData.shops.find(s => s.id === id)
   await delay()
@@ -528,7 +538,7 @@ const SAMPLE_REVIEWS = [
 
 export async function getShopReviews(shopId) {
   if (REAL_API_ENABLED) {
-    try { return await realApi('/shops/' + encodeURIComponent(shopId) + '/reviews') } catch (e) { console.warn('[api] /shops/:id/reviews 真实接口失败，回退 mock：', e && e.message) }
+    try { return await realApi('/shops/' + encodeURIComponent(shopId) + '/reviews') } catch (e) { if (!ALLOW_MOCK_FALLBACK) throw e; console.warn('[api] /shops/:id/reviews 真实接口失败，回退 mock：', e && e.message) }
   }
   await delay(120)
   return SAMPLE_REVIEWS
@@ -568,7 +578,7 @@ export async function getProductReviews(productId) {
 export function getShopList() {
   return cached('shops', 5 * 60 * 1000, async () => {
     if (REAL_API_ENABLED) {
-      try { return await realApi('/shops') } catch (e) { console.warn('[api] /shops 真实接口失败，回退 mock：', e && e.message) }
+      try { return await realApi('/shops') } catch (e) { if (!ALLOW_MOCK_FALLBACK) throw e; console.warn('[api] /shops 真实接口失败，回退 mock：', e && e.message) }
     }
     await delay(140)
     return mockData.shops
@@ -577,7 +587,7 @@ export function getShopList() {
 
 export async function searchAll(keyword) {
   if (REAL_API_ENABLED) {
-    try { return await realApi('/search', { q: keyword }) } catch (e) { console.warn('[api] /search 真实接口失败，回退 mock：', e && e.message) }
+    try { return await realApi('/search', { q: keyword }) } catch (e) { if (!ALLOW_MOCK_FALLBACK) throw e; console.warn('[api] /search 真实接口失败，回退 mock：', e && e.message) }
   }
   const kw = (keyword || '').trim().toLowerCase()
   if (!kw) return { flowers: [], shops: [] }
@@ -790,6 +800,7 @@ export async function sendSmsCode(phone) {
       return { ok: true, debug: !!d.debug, code: d.code || '' }
     } catch (e) {
       if (!isNetErr(e)) throw e // 429 限频/手机号格式等如实上报
+      if (!ALLOW_MOCK_FALLBACK) throw e // /auth/sms/send：生产不回退演示数据
       console.warn('[api] /auth/sms/send 网络失败，回退 mock：', e && e.message)
     }
   }
@@ -852,14 +863,17 @@ export async function loginByPassword(account, password) {
 //      ui 类型：text / dialog_options / plan_card / shop_card / order_card / pay_jump
 // 开发态：apiBase 默认 '/agent'（Vite dev 代理转发，同源免 CORS）；生产可设 VITE_AGENT_API_BASE=https://api.tiaowulan.com
 // 任何异常（无 key / 网络 / CORS / 超时）→ 自动回退前端 mock 演示
-// 🔐 平台 Key 绝不进前端包（打包后浏览器可见即等于公开）。
-//    生产走同源反代（apiBase='/agent'，由 deploy/server.cjs 注入 X-API-Key）；
-//    仅当直连绝对地址（VITE_AGENT_API_BASE 为 http(s)://…）时才需要 VITE_AGENT_API_KEY。
+// 🔴 平台 Key 绝不进前端包 —— 且**不能**从 `import.meta.env.VITE_*` 取：
+//    Vite 会在构建期把 VITE_ 前缀变量**内联成字面量**写进 bundle，
+//    打包后浏览器一看 JS 就能拿到，等于把密钥公开挂在网上
+//    （2026-09-18 外部审计 P0-2：线上 api-*.js 里确实躺着明文 Key，已移除）。
+//    生产一律走同源反代（apiBase='/agent'），由 deploy/server.cjs 在服务端注入 X-API-Key。
 export const AGENT_CONFIG = {
   apiBase: import.meta.env.VITE_AGENT_API_BASE || '/agent',
   enabled: true, // 就绪即走真实智能体，失败自动回退 mock
   get apiToken() {
-    return import.meta.env.VITE_AGENT_API_KEY || ''
+    // 刻意恒为空：前端不需要、也永远拿不到平台 Key。
+    return ''
   },
   // apiBase 为相对路径 = 经同源反代，key 由服务端注入
   get viaProxy() {

@@ -327,10 +327,27 @@ app.get('/api/flowers/:id', async (req, res) => {
 })
 
 // 门店列表（首页「更多花店」；仅 API 源提供，DB 源无独立列表路由时同返空）
+// 店铺列表（公开、无鉴权）→ 只给列表页真正需要的字段。
+// 🔴 2026-09-18 外部审计 P0-1：原先直接返回 toShop(s)，含子商户号/分账比例/手机号，
+//    匿名即可批量抓走 12 家门店的商业信息。现在统一剥离：
+//      · subMchId / profitSharingRatio —— 支付与分账机密，任何对外响应都不出现
+//      · phone                        —— 门店联系方式，只在店铺详情页（单店）按需给出
+//      · flowers                      —— 店内商品 id 全表，列表页用不到（也让响应从 40KB 降到几 KB）
+const SHOP_LIST_FIELDS = [
+  'id', 'name', 'avatar', 'cover', 'categoryId', 'rating', 'ratingCount', 'monthSales',
+  'deliveryTime', 'deliveryFee', 'minOrderPrice', 'address', 'distance', 'distanceKm',
+  'tags', 'isNew', 'description', 'businessHours', 'city', 'status'
+]
+function pickShopForList(shop) {
+  const out = {}
+  for (const k of SHOP_LIST_FIELDS) if (shop[k] !== undefined) out[k] = shop[k]
+  return out
+}
+
 app.get('/api/shops', async (req, res) => {
   if (READ_SOURCE === 'api') {
     try {
-      const list = (await storeAllShops()).map(s => toShop(s))
+      const list = (await storeAllShops()).map(s => pickShopForList(toShop(s)))
       res.json(list)
     } catch (e) {
       fail(res, e)
@@ -339,7 +356,7 @@ app.get('/api/shops', async (req, res) => {
   }
   try {
     const sRows = await query(`SELECT * FROM \`${T.shops}\` LIMIT 100`)
-    res.json(sRows.map(s => mapShopRow(s)))
+    res.json(sRows.map(s => pickShopForList(mapShopRow(s))))
   } catch (e) {
     fail(res, e)
   }

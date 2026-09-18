@@ -86,7 +86,71 @@ function serveStatic(req, res) {
   })
 }
 
+// ────────────────────────────────────────────────────────────────
+// /agent 反代限流（2026-09-18 外部审计 P0-2）
+// 🔴 问题：/agent/* 是一条**公开**反代，服务端会替调用方注入平台 Key。
+//    实测：无需登录、无任何凭证，POST /agent/auth/token 即可换到 30 天令牌，
+//    随后可无限调用 /chat/stream（含生图）——烧的是我们的模型与生图费用。
+//    前端 bundle 里残留的 Key 只是"次要"问题，**真正的入口是这条反代**。
+// 这里做的是**滥用闸门**（不是鉴权）：
+//    ① 按 IP 滑窗限流（token 与 chat 分开计）
+//    ② 全局并发上限（对话/生图很吃上游）
+//    ③ 全局日配额兜底（防分布式刷）
+// 若要彻底关闭匿名可用，需产品层面改为「必须登录 H5 才转发 /agent/*」。
+const num = (v, d) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : d }
+const RL = {
+  tokenPerHour: num(process.env.AGENT_RL_TOKEN_PER_HOUR, 20),
+  chatPerHour: num(process.env.AGENT_RL_CHAT_PER_HOUR, 40),
+  dailyTotal: num(process.env.AGENT_RL_DAILY_TOTAL, 3000),
+  maxConcurrent: num(process.env.AGENT_RL_MAX_CONCURRENT, 6)
+}
+const HOUR = 3600 * 1000
+const rlBuckets = new Map()   // ip -> { token: [ts], chat: [ts] }
+let agentInFlight = 0
+let agentDay = { day: '', count: 0 }
+
+function clientIp(req) {
+  // nginx 在前面，真实 IP 看 X-Forwarded-For 的第一跳
+  const xff = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim()
+  return xff || (req.socket && req.socket.remoteAddress) || 'unknown'
+}
+function rlHit(ip, kind) {
+  const now = Date.now()
+  let b = rlBuckets.get(ip)
+  if (!b) { b = { token: [], chat: [] }; rlBuckets.set(ip, b) }
+  const arr = b[kind] || (b[kind] = [])
+  while (arr.length && now - arr[0] > HOUR) arr.shift()
+  const limit = kind === 'token' ? RL.tokenPerHour : RL.chatPerHour
+  if (arr.length >= limit) return false
+  arr.push(now)
+  return true
+}
+function rlSweep() {
+  const now = Date.now()
+  for (const [ip, b] of rlBuckets) {
+    for (const k of ['token', 'chat']) {
+      if (b[k]) b[k] = b[k].filter(t => now - t <= HOUR)
+    }
+    if (!b.token.length && !b.chat.length) rlBuckets.delete(ip)
+  }
+}
+setInterval(rlSweep, 10 * 60 * 1000).unref()
+
 function proxyAgent(req, res) {
+  const ip = clientIp(req)
+  if (req.url.startsWith('/agent/auth/token') && !rlHit(ip, 'token')) {
+    return tooMany(res, '请求过于频繁，请稍后再试')
+  }
+  if (/^\/agent\/(chat|tasks)/.test(req.url)) {
+    if (!rlHit(ip, 'chat')) return tooMany(res, '对话请求过于频繁，请稍后再试')
+    if (agentInFlight >= RL.maxConcurrent) return tooMany(res, '当前咨询较多，请稍后再试')
+    const today = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10)
+    if (agentDay.day !== today) agentDay = { day: today, count: 0 }
+    if (agentDay.count >= RL.dailyTotal) return tooMany(res, '今日服务繁忙，请稍后再试')
+    agentDay.count++
+    agentInFlight++
+    res.on('close', () => { agentInFlight = Math.max(0, agentInFlight - 1) })
+  }
   const targetPath = req.url.replace(/^\/agent/, '') || '/'
   const targetUrl = new URL(targetPath, AGENT_TARGET)
   const headers = { ...req.headers, host: targetUrl.host }
@@ -106,6 +170,11 @@ function proxyAgent(req, res) {
     res.end('agent upstream error')
   })
   req.pipe(upstream)
+}
+
+function tooMany(res, msg) {
+  res.writeHead(429, { 'Content-Type': 'application/json; charset=utf-8', 'Retry-After': '60' })
+  res.end(JSON.stringify({ detail: msg }))
 }
 
 const server = http.createServer((req, res) => {
