@@ -12,7 +12,7 @@ import {
 import payRouter, { handleNotify } from './pay.js'
 import { startProfitSharingScanner } from './profitsharing.js'
 import { startMerchantBridgeScanner, merchantBridgeInfo } from './merchantBridge.js'
-import ordersRouter from './orders.js'
+import ordersRouter, { reconcileRefundReviews, refundReviewInfo } from './orders.js'
 import authRouter from './auth.js'
 
 const app = express()
@@ -516,4 +516,16 @@ app.listen(PORT, () => {
   startProfitSharingScanner()
   // 启动商家后端订单桥接的补偿扫描（未启用时同样只打印一行说明；首扫在 15s 后）
   startMerchantBridgeScanner()
+  // 退款审核结果回收（未启用 MERCHANT_REFUND_REVIEW_ENABLED 时只打印说明）
+  const rr = refundReviewInfo()
+  if (rr.enabled) {
+    const tick = () => reconcileRefundReviews().catch(e => console.warn('[退款审核] 回收异常：', e && e.message))
+    const t = setInterval(tick, 3 * 60 * 1000)
+    if (t.unref) t.unref()
+    setTimeout(tick, 20 * 1000)
+    console.log('[退款审核] 已启用：申请后需商家审核，通过后由 H5 执行退款；每 3 分钟回收一次结果',
+      rr.adminApi ? '（含运营兜底接口）' : '（未配置兜底令牌，运营接口关闭）')
+  } else {
+    console.log('[退款审核] 未启用（MERCHANT_REFUND_REVIEW_ENABLED != true）→ 用户申请退款仍为立即退款')
+  }
 })

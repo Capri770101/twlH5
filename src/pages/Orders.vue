@@ -58,11 +58,14 @@
           <button v-if="!order._hasReview" class="btn btn-outline btn-sm" @click.stop="goReview(order.id)">去评价</button>
           <button class="btn btn-primary btn-sm" @click.stop="repeatOrder(order)">再来一单</button>
         </div>
-        <div v-else-if="!['refunding', 'refunded', 'cancelled'].includes(order.status)" class="order-actions">
+        <div v-else-if="!['refund_applying', 'refunding', 'refunded', 'cancelled'].includes(order.status)" class="order-actions">
           <button v-if="order._canRefund" class="btn btn-outline btn-sm" @click.stop="openRefund(order)">申请退款</button>
           <button class="btn btn-primary btn-sm" @click.stop="repeatOrder(order)">再来一单</button>
         </div>
-        <div v-if="order.status === 'refunding'" class="order-actions">
+        <div v-if="order.status === 'refund_applying'" class="order-actions">
+          <span class="order-refunding-tip">退款申请已提交，等待商家审核</span>
+        </div>
+        <div v-else-if="order.status === 'refunding'" class="order-actions">
           <span class="order-refunding-tip">退款处理中，请留意到账通知</span>
         </div>
         <div v-else-if="order.status === 'refund_failed'" class="order-actions">
@@ -306,11 +309,18 @@ function openRefund(order) {
 }
 function onRefundSuccess(res) {
   showRefund.value = false
+  // 审核模式：申请后仅进入「退款审核中」，资金未动 —— 文案必须说清
+  if (res && res.pendingReview) {
+    toast('退款申请已提交，等待商家审核')
+    load()
+    return
+  }
   const st = (res && res.status) || 'refunding'
   toast(
     st === 'refunded' ? '退款已原路退回'
-      : st === 'refund_failed' ? '退款未成功，可稍后重试或联系客服'
-        : '已提交退款申请，处理中'
+      : st === 'refund_applying' ? '退款申请已提交，等待商家审核'
+        : st === 'refund_failed' ? '退款未成功，可稍后重试或联系客服'
+          : '已提交退款申请，处理中'
   )
   // 以服务端状态为准重新拉取：以前只改内存里的 status，一刷新就变回「已支付」，
   // 而且 _canRefund 仍为真 → 可以反复申请退款。

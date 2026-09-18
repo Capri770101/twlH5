@@ -28,6 +28,29 @@
         </div>
       </div>
 
+      <!-- 门店履约进度（订单已同步给出花门店时展示；进度由商家后端回捞） -->
+      <div v-if="order.merchant && order.merchant.synced" class="section-card merchant-card">
+        <div class="section-title-row">
+          <span class="section-title">🏪 门店履约进度</span>
+          <span class="merchant-badge">来自门店</span>
+        </div>
+        <div class="merchant-row">
+          <span class="merchant-status">{{ order.merchant.statusText || '已通知门店' }}</span>
+          <span v-if="order.merchant.statusAt" class="merchant-time">{{ order.merchant.statusAt }}</span>
+        </div>
+        <div v-if="order.merchant.refundAuditText" class="merchant-row merchant-refund">
+          <span>退款审核：{{ order.merchant.refundAuditText }}</span>
+        </div>
+        <p class="merchant-tip">订单已同步给出花门店，进度由门店实时更新</p>
+      </div>
+      <div v-else-if="order.merchant && order.merchant.pendingSync" class="section-card merchant-card">
+        <div class="section-title-row">
+          <span class="section-title">🏪 门店履约进度</span>
+        </div>
+        <p class="merchant-tip">正在通知出花门店，稍后刷新即可看到门店进度</p>
+        <p v-if="order.merchant.error" class="merchant-err">{{ order.merchant.error }}</p>
+      </div>
+
       <!-- 商品信息 -->
       <div class="section-card">
         <div class="section-title-row">
@@ -208,7 +231,10 @@ const statusDesc = computed(() => {
   const map = {
     making: '花艺师正在精心制作您的花束',
     completed: '感谢您的购买，期待再次光临',
-    pending: '商家已接单，正在为您准备'
+    pending: '商家已接单，正在为您准备',
+    // 退款审核中：资金尚未发生任何变动，别让用户以为钱在路上
+    refund_applying: '退款申请已提交，商家审核通过后原路退回',
+    refunding: '退款正在处理中，请留意到账通知'
   }
   return map[o.status] || '订单已提交，请尽快支付'
 })
@@ -232,11 +258,18 @@ function goReview() {
 
 const showRefund = ref(false)
 async function onRefundSuccess(res) {
+  // 审核模式：申请后仅进入「退款审核中」，资金未动 —— 文案必须说清，别谎称"处理中"
+  if (res && res.pendingReview) {
+    toast('退款申请已提交，等待商家审核')
+    await reload()
+    return
+  }
   const st = (res && res.status) || 'refunding'
   toast(
     st === 'refunded' ? '退款已原路退回'
-      : st === 'refund_failed' ? '退款未成功，可稍后重试或联系客服'
-        : '已提交退款申请，处理中'
+      : st === 'refund_applying' ? '退款申请已提交，等待商家审核'
+        : st === 'refund_failed' ? '退款未成功，可稍后重试或联系客服'
+          : '已提交退款申请，处理中'
   )
   // 重新拉取详情：状态以服务端为准（以前只改内存，刷新后回到「已支付」）
   await reload()
@@ -434,6 +467,51 @@ onMounted(async () => {
 }
 .card-content {
   color: #FF6B6B;
+}
+/* 门店履约进度（进度来自商家后端，故与平台自身状态区分标识） */
+.merchant-card {
+  border-left: rpx(6) solid var(--primary);
+}
+.merchant-badge {
+  margin-left: auto;
+  font-size: rpx(20);
+  line-height: 1.6;
+  padding: 0 rpx(10);
+  border-radius: rpx(6);
+  color: #3F9E6A;
+  background: #EAF6EF;
+  border: 1px solid #CBE8D7;
+}
+.merchant-row {
+  display: flex;
+  align-items: baseline;
+  gap: rpx(12);
+  margin-top: rpx(12);
+}
+.merchant-status {
+  font-size: rpx(28);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.merchant-time {
+  font-size: rpx(22);
+  color: var(--text-light);
+}
+.merchant-refund {
+  font-size: rpx(24);
+  color: var(--text-secondary);
+}
+.merchant-tip {
+  margin-top: rpx(10);
+  font-size: rpx(22);
+  color: var(--text-light);
+  line-height: 1.6;
+}
+.merchant-err {
+  margin-top: rpx(6);
+  font-size: rpx(22);
+  color: #D8453B;
+  line-height: 1.6;
 }
 .refund-amount {
   color: #E8615D;

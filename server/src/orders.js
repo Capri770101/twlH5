@@ -10,6 +10,18 @@ import { hq, withTx } from './h5db.js'
 import { resolveUser as resolveTokenUser } from './token.js'
 import { toFlower, storeAllFlowers } from './store.js'
 import { refundOrderCore } from './pay.js'
+import { submitRefundRequest, pollRefundAudit } from './merchantBridge.js'
+
+/**
+ * 退款走「商家人工审核」的开关。
+ * 🔴 打开前必须确认：商家后端的 refund-approve 已改成**对 H5 单只标记、不执行微信退款**
+ *    （见 docs/退款审核与订单同步-实施方案.md §9），否则会出现「钱不动、状态卡住」。
+ * 关闭时，退款保持原有「用户申请即立即退款」的行为，完全不变。
+ */
+const REFUND_REVIEW = String(process.env.MERCHANT_REFUND_REVIEW_ENABLED || '').toLowerCase() === 'true'
+/** 运营兜底审核令牌（商家侧无法处理时由 H5 侧放行）；留空 = 该组接口整体关闭 */
+const REFUND_ADMIN_TOKEN = String(process.env.MERCHANT_REFUND_ADMIN_TOKEN || '')
+export const refundReviewInfo = () => ({ enabled: REFUND_REVIEW, adminApi: !!REFUND_ADMIN_TOKEN })
 
 const router = express.Router()
 
@@ -17,12 +29,22 @@ const router = express.Router()
 const FRONT_STATUS = {
   pending: 'new', paid: 'pending',
   making: 'making', delivering: 'delivering', completed: 'completed',
-  cancelled: 'cancelled', refunding: 'refunding', refunded: 'refunded', refund_failed: 'refund_failed'
+  cancelled: 'cancelled', refunding: 'refunding', refunded: 'refunded', refund_failed: 'refund_failed',
+  // 退款审核中：已提交申请、等待商家审核，资金尚未发生任何变动。
+  // 🔴 语义必须与 refunding（已通过、正在退）严格区分，否则用户会以为钱在路上。
+  refund_applying: 'refund_applying'
 }
 const STATUS_TEXT = {
   new: '待付款', pending: '待接单', making: '制作中', delivering: '配送中',
   completed: '已完成', cancelled: '已取消', refunding: '退款中',
-  refunded: '已退款', refund_failed: '退款失败'
+  refunded: '已退款', refund_failed: '退款失败',
+  refund_applying: '退款审核中'
+}
+/** 商家侧履约状态 → 展示文案（订单详情「商家进度」用） */
+const MERCHANT_STATUS_TEXT = {
+  new: '商家待支付', pending: '商家待接单', paid: '商家已接单',
+  making: '制作中', delivering: '配送中', completed: '已完成',
+  refunding: '商家处理退款中', refunded: '商家已退款', refund_failed: '退款失败', cancelled: '商家已取消'
 }
 
 /**
@@ -48,7 +70,7 @@ function dbStatuses(status) {
     case 'delivering': return ['delivering']
     case 'completed': return ['completed']
     case 'review': return ['completed'] // 暂无评价系统：已完成即视为待评价
-    case 'refund': return ['refunding', 'refunded', 'refund_failed']
+    case 'refund': return ['refund_applying', 'refunding', 'refunded', 'refund_failed']
     case 'cancelled': return ['cancelled']
     default: return null
   }
@@ -120,7 +142,22 @@ function toFront(o, items = []) {
       applyTime: o.refund_apply_time || '',
       time: o.refund_time || ''
     } : null,
-    deliveryInfo: null
+    deliveryInfo: null,
+    // 商家侧履约进度（订单投递成功后才有；前端订单详情据此展示「商家进度」）
+    merchant: o.merchant_sync_state === 'success' ? {
+      synced: true,
+      status: o.merchant_status || '',
+      statusText: MERCHANT_STATUS_TEXT[o.merchant_status] || o.merchant_status || '',
+      statusAt: o.merchant_status_at || '',
+      refundAudit: o.merchant_refund_audit || '',
+      refundAuditText: o.merchant_refund_audit === 'approved' ? '商家已同意'
+        : (o.merchant_refund_audit === 'rejected' ? '商家已拒绝' : '')
+    } : {
+      synced: false,
+      // 已收款却还没送达商家：前端可提示「正在通知门店」，避免用户以为没人管
+      pendingSync: ['paid', 'making', 'delivering', 'completed'].includes(o.status),
+      error: o.merchant_sync_error || ''
+    }
   }
 }
 
@@ -304,11 +341,197 @@ router.post('/:id/cancel', async (req, res) => {
 //        前端又只在内存里把状态改成 refunding → 实际「钱已退、系统仍显示已支付、还能反复申请」。
 const REFUNDABLE_DB = ['paid', 'making', 'delivering', 'refund_failed']
 
+// ==================== 退款审核模式（MERCHANT_REFUND_REVIEW_ENABLED=true 时生效） ====================
+/**
+ * 用户申请退款 → 只做原子占位（refund_applying），**资金一分不动**，
+ * 然后把申请投递给商家，等商家在后台审核；审核通过后由 H5 执行微信退款。
+ * 与原来「申请即退款」的差别只有一点：发起微信退款那一步被移到了审核之后。
+ */
+async function applyRefundWithReview(res, { id, userId, b }) {
+  try {
+    const rows = await hq('SELECT * FROM orders WHERE id = ? AND user_id = ? LIMIT 1', [id, userId])
+    if (!rows.length) return res.status(404).json({ error: '订单不存在' })
+    const ord = rows[0]
+    if (!REFUNDABLE_DB.includes(ord.status)) {
+      const fs = FRONT_STATUS[ord.status] || ord.status
+      const inFlight = ['refund_applying', 'refunding', 'refunded'].includes(fs)
+      return res.status(409).json({
+        error: inFlight ? '该订单已在退款处理中' : ('当前状态不可申请退款（' + (STATUS_TEXT[fs] || ord.status) + '）'),
+        status: fs, statusText: STATUS_TEXT[fs] || fs
+      })
+    }
+    const total = Math.round(Number(ord.total_price) || 0)
+    const wantFen = Math.round(Number(b.amountFen) || 0) || total
+    if (!(wantFen > 0) || wantFen > total) {
+      return res.status(400).json({ error: '退款金额不合法（应为 1 ~ ' + total + ' 分）' })
+    }
+
+    // ① 原子占位 → refund_applying，并记下原状态供「被拒」时恢复
+    const lock = await hq(
+      `UPDATE orders
+          SET status = 'refund_applying', refund_prev_status = ?, refund_reason = ?, refund_amount = ?,
+              refund_apply_time = NOW(), refund_updated_at = NOW(),
+              refund_message = '已提交，等待商家审核'
+        WHERE id = ? AND user_id = ? AND status IN ('paid','making','delivering','refund_failed')`,
+      [ord.status, String(b.reason || '用户申请退款').slice(0, 255), wantFen, id, userId]
+    )
+    if (!lock.affectedRows) {
+      return res.status(409).json({ error: '订单状态已变化，请刷新后重试', status: 'refund_applying', statusText: '退款审核中' })
+    }
+    // ② 进入退款流程即取消待分账（与无审核路径同一规则）
+    await hq("UPDATE orders SET ps_state='cancelled', ps_updated_at=NOW() WHERE id=? AND ps_state='pending'", [id])
+
+    // ③ 投递给商家审核。失败**不阻断**：申请已生效，补偿扫描会重投，运营也可后台兜底放行
+    let ok = false, why = ''
+    try {
+      const r = await submitRefundRequest(id)
+      ok = !!r.ok
+      why = r.message || ''
+    } catch (e) { why = String((e && e.message) || e) }
+    if (!ok) {
+      console.warn('[orders] 退款申请投递商家失败（保留待审状态，稍后自动重试）：', id, why)
+      await hq('UPDATE orders SET refund_message = ? WHERE id = ?', ['已提交，等待审核', id])
+    }
+    return res.json({
+      ok: true, status: 'refund_applying', statusText: '退款审核中',
+      message: '退款申请已提交，等待商家审核', pendingReview: true
+    })
+  } catch (e) {
+    console.error('[orders] 申请退款（审核模式）异常：', e && e.message)
+    return res.status(500).json({ error: String((e && e.message) || e) })
+  }
+}
+
+/** 审核通过 → H5 执行微信退款（**唯一出账点**）。幂等：状态前置校验 + out_refund_no 由订单号派生。 */
+export async function executeApprovedRefund(id, { reason } = {}) {
+  const rows = await hq('SELECT * FROM orders WHERE id = ? LIMIT 1', [id])
+  const ord = rows && rows[0]
+  if (!ord) return { ok: false, message: '订单不存在' }
+  if (ord.status === 'refunded') return { ok: true, skipped: 'already_refunded' }
+  if (ord.status !== 'refund_applying') return { ok: false, message: '订单不在待审核状态：' + ord.status }
+
+  const wantFen = Math.round(Number(ord.refund_amount) || 0) || Math.round(Number(ord.total_price) || 0)
+  let r
+  try {
+    r = await refundOrderCore(id, {
+      reason: String(reason || ord.refund_reason || '用户申请退款'),
+      amountFen: wantFen,
+      shopId: ord.shop_id
+    })
+  } catch (e) {
+    const msg = String((e && e.message) || e).slice(0, 255)
+    console.error('[orders] 审核通过后退款失败 order=%s：%s', id, msg)
+    await hq("UPDATE orders SET status='refund_failed', refund_message=?, refund_updated_at=NOW() WHERE id=?",
+      ['退款失败：' + msg, id])
+    return { ok: false, message: msg }
+  }
+  const wx = String(r.wxStatus || '').toUpperCase()
+  const finalDb = wx === 'SUCCESS' ? 'refunded' : (wx === 'PROCESSING' ? 'refunding' : 'refund_failed')
+  await hq(
+    `UPDATE orders
+        SET status = ?, refund_no = ?, refund_amount = ?, refund_message = ?,
+            refund_time = ${finalDb === 'refunded' ? 'NOW()' : 'NULL'},
+            refund_updated_at = NOW()
+      WHERE id = ?`,
+    [finalDb, r.refundNo, r.amountFen, '微信退款状态：' + (wx || '未知'), id]
+  )
+  console.log('[orders] 审核通过已退款 order=%s 微信=%s → %s 退款号=%s 金额=%d分',
+    id, wx || '未知', finalDb, r.refundNo, r.amountFen)
+  const fs = FRONT_STATUS[finalDb]
+  return { ok: true, status: fs, statusText: STATUS_TEXT[fs] || finalDb, refundNo: r.refundNo, amountFen: r.amountFen, wxStatus: wx }
+}
+
+/** 商家拒绝 → 恢复退款前的状态，订单继续履约 */
+export async function rejectRefund(id, { reason } = {}) {
+  const rows = await hq('SELECT * FROM orders WHERE id = ? LIMIT 1', [id])
+  const ord = rows && rows[0]
+  if (!ord) return { ok: false, message: '订单不存在' }
+  if (ord.status !== 'refund_applying') return { ok: false, message: '订单不在待审核状态：' + ord.status }
+  const back = ['paid', 'making', 'delivering', 'completed'].includes(ord.refund_prev_status) ? ord.refund_prev_status : 'paid'
+  await hq(
+    `UPDATE orders SET status = ?, refund_amount = 0, refund_reason = NULL,
+            refund_message = ?, refund_updated_at = NOW() WHERE id = ?`,
+    [back, '退款申请未通过：' + String(reason || '不符合退款条件').slice(0, 120), id]
+  )
+  console.log('[orders] 退款被拒，订单恢复为 %s：%s', back, id)
+  return { ok: true, status: FRONT_STATUS[back] || back, statusText: STATUS_TEXT[FRONT_STATUS[back]] || back }
+}
+
+/**
+ * 审核结果回收：扫描 refund_applying 的订单，读商家审核结果并落地。
+ *   approved → H5 执行退款      rejected → 恢复订单状态
+ * 由 index.js 定时调用（与分账扫描同一模式）。
+ */
+export async function reconcileRefundReviews(limit = 10) {
+  if (!REFUND_REVIEW) return { skipped: 'disabled' }
+  const rows = await hq(
+    `SELECT id, merchant_refund_audit FROM orders
+      WHERE status = 'refund_applying' AND refund_apply_time > DATE_SUB(NOW(), INTERVAL 30 DAY)
+      ORDER BY refund_apply_time ASC LIMIT ?`,
+    [limit]
+  )
+  let approved = 0, rejected = 0, pending = 0
+  for (const r of rows || []) {
+    let audit = r.merchant_refund_audit || null
+    let reason = ''
+    try {
+      const p = await pollRefundAudit(r.id)
+      audit = p.audit || audit
+      reason = p.reason || ''
+    } catch (e) { /* 商家不可达 → 下轮再试 */ }
+    if (audit === 'approved') { const x = await executeApprovedRefund(r.id); if (x.ok) approved++ }
+    else if (audit === 'rejected') { const x = await rejectRefund(r.id, { reason }); if (x.ok) rejected++ }
+    else pending++
+  }
+  if (approved || rejected) console.log('[退款审核] 回收：通过 %d / 拒绝 %d / 待审 %d', approved, rejected, pending)
+  return { approved, rejected, pending, total: (rows || []).length }
+}
+
+// ---------- 运营兜底审核（商家侧无法处理时使用，独立令牌） ----------
+// 🔴 守卫「只发一次响应」：未配令牌 → 404（整组关闭）；令牌不符 → 401。
+//    调用处一律写成 `if (!guardRefundAdmin(req, res)) return`，
+//    绝不能再补一次 res.json —— 那会 ERR_HTTP_HEADERS_SENT 并**直接崩掉进程**（踩过）。
+function guardRefundAdmin(req, res) {
+  if (!REFUND_ADMIN_TOKEN) {
+    res.status(404).json({ error: 'not found' })
+    return false
+  }
+  if (String(req.headers['x-refund-token'] || '') !== REFUND_ADMIN_TOKEN) {
+    res.status(401).json({ error: 'unauthorized' })
+    return false
+  }
+  return true
+}
+
+router.get('/admin/refund/pending', async (req, res) => {
+  if (!guardRefundAdmin(req, res)) return
+  const rows = await hq(
+    `SELECT id, shop_id, shop_name, refund_amount, refund_reason, refund_apply_time,
+            merchant_order_id, merchant_status, merchant_refund_audit, refund_prev_status
+       FROM orders WHERE status = 'refund_applying' ORDER BY refund_apply_time ASC LIMIT 200`
+  )
+  res.json({ list: rows })
+})
+
+router.post('/admin/refund/:id/approve', async (req, res) => {
+  if (!guardRefundAdmin(req, res)) return
+  const r = await executeApprovedRefund(String(req.params.id), { reason: (req.body || {}).reason })
+  res.status(r.ok ? 200 : 409).json(r)
+})
+
+router.post('/admin/refund/:id/reject', async (req, res) => {
+  if (!guardRefundAdmin(req, res)) return
+  const r = await rejectRefund(String(req.params.id), { reason: (req.body || {}).reason })
+  res.status(r.ok ? 200 : 409).json(r)
+})
+
 router.post('/:id/refund', async (req, res) => {
   const userId = await resolveUser(req)
   if (!userId) return res.status(401).json({ error: '请先登录后再申请退款', needLogin: true })
   const id = String(req.params.id || '')
   const b = (req.body && typeof req.body === 'object') ? req.body : {}
+  // 审核模式：只占位 + 送审，不发起微信退款（资金执行权随后由审核结果驱动）
+  if (REFUND_REVIEW) return applyRefundWithReview(res, { id, userId, b })
   try {
     const rows = await hq('SELECT * FROM orders WHERE id = ? AND user_id = ? LIMIT 1', [id, userId])
     if (!rows.length) return res.status(404).json({ error: '订单不存在' })
