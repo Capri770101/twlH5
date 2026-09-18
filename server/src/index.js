@@ -11,6 +11,7 @@ import {
 } from './store.js'
 import payRouter, { handleNotify } from './pay.js'
 import { startProfitSharingScanner } from './profitsharing.js'
+import { startMerchantBridgeScanner, merchantBridgeInfo } from './merchantBridge.js'
 import ordersRouter from './orders.js'
 import authRouter from './auth.js'
 
@@ -167,7 +168,8 @@ app.get('/api/health', async (req, res) => {
     h5Error: h5Connected ? null : String(h5.reason && h5.reason.message || h5.reason),
     storeOk,                                  // 商品数据源（aistore API）
     storeError: storeOk ? null : String(storeR.reason && storeR.reason.message || storeR.reason),
-    tables: T, priceUnit: process.env.DB_PRICE_UNIT || 'cents'
+    tables: T, priceUnit: process.env.DB_PRICE_UNIT || 'cents',
+    merchantBridge: merchantBridgeInfo()      // 商家后端订单桥接（未启用时 enabled:false）
   })
 })
 
@@ -512,4 +514,6 @@ app.listen(PORT, () => {
   console.log(`[server]   ${src}（READ_SOURCE=${store}）`)
   // 启动分账扫描（未启用时会打印一行说明；启用后首扫在 10s 后）
   startProfitSharingScanner()
+  // 启动商家后端订单桥接的补偿扫描（未启用时同样只打印一行说明；首扫在 15s 后）
+  startMerchantBridgeScanner()
 })

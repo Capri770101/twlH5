@@ -25,6 +25,20 @@ const STATUS_TEXT = {
   refunded: '已退款', refund_failed: '退款失败'
 }
 
+/**
+ * 满减规则（单位：分）—— **以小程序后端 /opt/flower-shop 为准，两边必须完全一致**。
+ * 对齐的是商家后端 server.js::calcFullReduction()。不一致会导致：
+ *   ① 商家后台显示的金额与 H5 实付不符（用户在 H5 看到与商家看到的不是同一个数）
+ *   ② 商家按它自己的 totalPrice 发起退款 → 退款金额多退或少退
+ * 🔴 改动此处必须同步改 /opt/flower-shop/server.js 的 calcFullReduction，反之亦然。
+ */
+function fullReduction(fen) {
+  if (fen >= 30000) return 3000 // 满 ¥300 减 ¥30
+  if (fen >= 20000) return 2000 // 满 ¥200 减 ¥20
+  if (fen >= 10000) return 1000 // 满 ¥100 减 ¥10
+  return 0
+}
+
 // 前端 tab status → DB 状态集合（null = 全部）
 function dbStatuses(status) {
   switch (status) {
@@ -169,10 +183,10 @@ router.post('/', async (req, res) => {
     if (real == null) return res.status(400).json({ error: '商品不存在或已下架：' + (it.name || it.id) })
     it.price = real // 以库价为准
   }
-  // 服务端计价（分）：商品小计 - 满减（与前端 Checkout 同规则：满 200 减 20）
+  // 服务端计价（分）：商品小计 - 满减（规则见 fullReduction，与前端 Checkout 一致）
   const itemTotal = cleanItems.reduce((s, it) => s + it.price * it.quantity, 0)
   const deliveryFee = 0
-  const discount = itemTotal >= 20000 ? 2000 : 0
+  const discount = fullReduction(itemTotal)
   const totalPrice = itemTotal + deliveryFee - discount
 
   const pickupMethod = b.pickupMethod === 'pickup' ? 'pickup' : 'delivery'

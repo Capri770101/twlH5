@@ -16,6 +16,7 @@ import {
   PS, markPending, scanOnce, ensureReturnedBeforeRefund, psStatusForOrder, addReceiver,
   calcCommission, forceShare, psStats
 } from './profitsharing.js'
+import { notifyOrderPaid } from './merchantBridge.js'
 
 const router = express.Router()
 
@@ -311,6 +312,13 @@ async function onPaid(outTradeNo, transactionId, decrypted, channelHint) {
     await markPending(outTradeNo)
   } catch (e) {
     console.warn('[pay] 标记待分账失败（不影响支付落库）：', e.message)
+  }
+  // 投递给商家后端（触发商家的企业微信通知 + 门店派单）—— 同样非阻塞。
+  // 泄漏或失败由 merchantBridge 的补偿扫描兜底，绝不影响「钱已收」这条主链。
+  try {
+    notifyOrderPaid(outTradeNo)
+  } catch (e) {
+    console.warn('[pay] 触发商家桥接失败（不影响支付落库）：', e.message)
   }
 }
 

@@ -415,7 +415,15 @@ const selectedDateIndex = ref(0)
 const pendingTime = ref('')
 
 const goodsTotalPrice = computed(() => cartTotal.value)
-const discountAmount = computed(() => (goodsTotalPrice.value >= 20000 ? 2000 : 0))
+// 满减规则：与后端 server/src/orders.js::fullReduction 及小程序
+// /opt/flower-shop/server.js::calcFullReduction 三处必须完全一致（单位：分）
+const discountAmount = computed(() => {
+  const t = goodsTotalPrice.value
+  if (t >= 30000) return 3000
+  if (t >= 20000) return 2000
+  if (t >= 10000) return 1000
+  return 0
+})
 const payAmount = computed(() => goodsTotalPrice.value - discountAmount.value)
 
 const canSubmit = computed(() => {
