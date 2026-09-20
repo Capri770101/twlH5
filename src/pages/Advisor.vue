@@ -160,6 +160,11 @@
               @go-detail="onGoDetail"
             />
 
+            <!-- 城市过滤提示：商家只做同城配送，别城的商品已隐藏 -->
+            <p v-if="m.cityFiltered" class="city-filter-note">
+              已隐藏 {{ m.cityFiltered }} 件不在「{{ store.city }}」的商品（花店只做同城配送）
+            </p>
+
             <!-- 效果图（轮询回填；生成中显示 3:4 骨架 + 计时，出图后淡入）
                  ⚠️ 消息里已有 DIY 方案卡时不再单独渲染：图会填进该卡的封面，
                     否则同一张效果图会出现两次（卡片内一次、消息末尾一次）。 -->
@@ -284,7 +289,7 @@
 
 <script setup>
 import { ref, computed, nextTick, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import NavBar from '@/components/NavBar.vue'
 import FlowerImage from '@/components/FlowerImage.vue'
 import store, { addToCart, saveDiyPlan, yuan } from '@/store'
@@ -295,9 +300,59 @@ import {
 } from '@/mock/api'
 import { extractDiyPlan, isDiyScene } from '@/utils/extractDiyPlan'
 import { mergeAgentMessages, slimMessage, extractImageTaskId } from '@/utils/advisorHistory'
+import { ensureCity, cityShopIds, filterAgentMessageByCity } from '@/utils/city'
 import { toast } from '@/utils/toast'
 
 const router = useRouter()
+const route = useRoute()
+
+/**
+ * 入口上下文 —— 由「从哪个页面进来」决定，透传给智能体。
+ *
+ * 为什么要传：智能体的 entry 语义（flora `agent/ports.py` 2026-09-10 定）
+ *   product = 从商品详情页进 → 锁定该商品所属店铺
+ *   shop    = 从店铺详情页进 → 锁定该店铺
+ *   home    = 首页/搜索/分类等   → 全平台模式，可跨店推荐
+ *
+ * 以前这里把 shopId 写死成 'default'（flora 会规范化成 None = 未锁店），
+ * 导致「从商品详情页点 AI」也走全平台模式 → 智能体推荐的是全平台 1855 款商品，
+ * 其中跨城的会被前端城市过滤整卡剔除 → 用户看到 AI 说「点卡片下单」却一张卡都没有。
+ * 传对上下文后，锁店推荐的商品天然与本城一致，卡片能正常显示和下单。
+ */
+const entryCtx = {
+  entry: String(route.query.entry || '').trim() || undefined,
+  shopId: String(route.query.shop_id || '').trim() || undefined,
+  productId: String(route.query.product_id || '').trim() || undefined,
+  productTitle: String(route.query.product_title || '').trim() || undefined
+}
+
+/**
+ * 本次对话该「锁定哪家店」。
+ *
+ * 从商品/店铺页进来时已有明确店铺（entryCtx.shopId），直接用。
+ * 从首页、搜索、分类等入口进来时**也要锁定本城的一家门店** —— 否则智能体走全平台模式，
+ * 按平台总部目录（1855 款、跨 11 城）推荐，跨城的商品会被城市过滤剔除，卡片整批消失
+ * （用户看到「点卡片下单」却一张卡都没有）。
+ *
+ * 为什么锁单店不损失选择：实测福州 2 家门店的商品**完全同名**（98 款 vs 98 款，同名 98），
+ * 其余 10 个城市各只有 1 家店 —— 所以锁一家店看到的款式集合＝全城款式集合。
+ * 代价仅剩「多家店时只展示其中一家的价格」。
+ *
+ * 只传 shop_id、不传 entry 即可：flora 的 normalize_entry 会按上下文推断成 'shop'（锁店）。
+ */
+let resolvedShopId = null
+async function resolveAgentShopId() {
+  if (entryCtx.shopId) return entryCtx.shopId
+  if (resolvedShopId !== null) return resolvedShopId
+  try {
+    const city = store.city || (await ensureCity())
+    const ids = await cityShopIds(city)
+    resolvedShopId = [...ids][0] || ''
+  } catch (e) {
+    resolvedShopId = '' // 拿不到门店 → 交回 default（全平台），由城市过滤兜底
+  }
+  return resolvedShopId
+}
 
 /** 报头返回（替代原来的 NavBar 返回；无历史时回首页） */
 const goBack = () => {
@@ -505,8 +560,11 @@ async function sendMessage() {
   try {
     const r = await streamAdvisorChat({
       message: text,
-      shopId: 'default',
+      shopId: (await resolveAgentShopId()) || 'default',
       sessionId: sessionId.value,
+      entry: entryCtx.entry,
+      productId: entryCtx.productId,
+      productTitle: entryCtx.productTitle,
       signal: abortCtl.value.signal,
       onEvent: ev => {
         if (!cur()) return
@@ -550,6 +608,7 @@ async function sendMessage() {
           if (d.content_disclosure) set({ disclosure: String(d.content_disclosure) })
           attachDiyPlan(cur())
           attachImageTaskFromText(cur())
+          applyCityFilter(cur())
         }
       }
     })
@@ -557,6 +616,7 @@ async function sendMessage() {
     // 兜底：若平台没发 done（异常中断等），流结束后再尝试一次（幂等）
     attachDiyPlan(cur())
     attachImageTaskFromText(cur())
+    applyCityFilter(cur())
 
     if (r && (r.ok || r.gotAny)) {
       agentMode.value = 'real'
@@ -573,8 +633,11 @@ async function sendMessage() {
       try {
         result = await chatWithAdvisor({
           message: text,
-          shopId: 'default',
-          sessionId: sessionId.value
+          shopId: (await resolveAgentShopId()) || 'default',
+          sessionId: sessionId.value,
+          entry: entryCtx.entry,
+          productId: entryCtx.productId,
+          productTitle: entryCtx.productTitle
         })
       } catch (e) {
         if (isAgentRateLimited(e)) {
@@ -597,6 +660,7 @@ async function sendMessage() {
         })
         const poll = cur().poll
         if (poll) startImagePoll(cur()) // 统一走同一条轮询逻辑（含状态/失败处理）
+        applyCityFilter(cur())
       }
     }
   } catch (e) {
@@ -743,6 +807,23 @@ function buyPlan(plan) {
 }
 
 // DIY 场景兜底：平台调了 generate_diy_plan 但没 emit card 事件时，
+/**
+ * 按当前城市过滤本消息的商品卡。
+ * 智能体的商品来自平台全量商品库（跨 11 个城市），而商家只做同城配送 ——
+ * 不筛选就会出现「AI 推荐了福州的花、深圳用户买了、付款后被商家拒单」。
+ * DIY 方案卡不涉及配送城市，不受影响（实现见 utils/city.js）。
+ */
+async function applyCityFilter(msg) {
+  if (!msg) return
+  try {
+    await ensureCity()
+    const dropped = await filterAgentMessageByCity(msg)
+    if (dropped > 0) msg.cityFiltered = dropped
+  } catch (e) {
+    console.warn('[advisor] 城市过滤失败：', e && e.message)
+  }
+}
+
 // 从流完的文本里启发式提取方案并合成 diy_plan_card（平台发了卡则跳过，不重复）
 function attachDiyPlan(msg) {
   if (!msg || !msg.text) return
@@ -1584,14 +1665,57 @@ onMounted(() => {
   text-align: center;
 }
 
-/* ── 商品/方案卡（网格）── */
+/* 城市过滤提示（别城商品已隐藏） */
+/* ⚠️ 本页是「花艺标本册」自成体系配色（--paper / --ink / --brass），
+   不要用全站的 --primary-* / --text-*（那套是粉色系），否则会冒出粉色块。
+   这一条原先误用了 --primary-light(#FFF0F0)，在本页米底墨绿里非常刺眼。 */
+.city-filter-note {
+  margin: rpx(16) 0 0;
+  padding: rpx(14) rpx(18);
+  border-radius: rpx(12);
+  background: var(--paper-3);
+  border: rpx(2) solid var(--line);
+  font-size: rpx(22);
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+
+/* ── 商品横向滚动框（方案卡 / DIY 封面共用）──
+   卡片固定宽度横向排列，一屏露出约 1.9 张 —— 末尾露半张即「可左右滑动」的天然提示。
+   ⚠️ overflow-y 必须显式 hidden，否则浏览器会把 visible 提升为 auto（纵向也滚）；
+      代价是卡片投影会被纵向裁掉，故用 padding-bottom + 等量负 margin 补偿。 */
 .prods {
-  /* 助手消息列比容器窄（左侧有黄铜竖线缩进），可用宽约 0.86rem：
-     两列需满足 2×min + gap ≤ 0.86rem，取 min=290rpx(0.3867rem) 有两列且留约 20px 余量 */
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(rpx(290), 1fr));
-  gap: rpx(24);
   margin-top: rpx(30);
+  display: flex;
+  flex-wrap: nowrap;
+  gap: rpx(24);
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  padding-bottom: rpx(14);
+  margin-bottom: rpx(-14);
+}
+.prods::-webkit-scrollbar { display: none; }
+/* 触屏设备藏滚动条（靠末尾露半张卡提示可滑）；桌面/带指针设备必须显示出来，
+   否则用鼠标的人没有任何「这里能滑」的线索。变量与 .stage 保持一致。 */
+@media (hover: hover) and (pointer: fine) {
+  .prods {
+    scrollbar-width: thin;
+    cursor: grab;
+    padding-bottom: rpx(24);
+    margin-bottom: rpx(-24);
+  }
+  .prods:active { cursor: grabbing; }
+  .prods::-webkit-scrollbar { display: block; height: rpx(10); }
+  .prods::-webkit-scrollbar-track { background: transparent; }
+  .prods::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: rpx(999); }
+}
+.prods > .prod {
+  flex: 0 0 rpx(320);
+  scroll-snap-align: start;
 }
 .prod {
   background: var(--paper-2);

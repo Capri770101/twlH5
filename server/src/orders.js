@@ -11,6 +11,7 @@ import { resolveUser as resolveTokenUser } from './token.js'
 import { toFlower, storeAllFlowers } from './store.js'
 import { refundOrderCore } from './pay.js'
 import { submitRefundRequest, pollRefundAudit } from './merchantBridge.js'
+import { checkCityMatch } from './cityGuard.js'
 
 /**
  * 退款走「商家人工审核」的开关。
@@ -230,6 +231,23 @@ router.post('/', async (req, res) => {
   const addr = (b.address && typeof b.address === 'object') ? b.address : {}
   const pickupName = String(b.pickupName || '').trim() || String(addr.name || '').trim()
   const pickupPhone = String(b.pickupPhone || '').trim() || String(addr.phone || '').trim()
+
+  // 🔴 下单前城市校验（配送单）：
+  //    商家后端 orders/create 会按「收货城市 == 门店服务城市」硬校验并拒单。
+  //    不在这里拦，用户就会「付款成功、商家收不到单」—— 比不接通更糟。
+  //    自提单跳过（无收货地址，城市无从校验）。
+  if (pickupMethod === 'delivery') {
+    const guard = await checkCityMatch(shopId, addr)
+    if (!guard.ok) {
+      return res.status(409).json({
+        error: guard.message,
+        code: 'CITY_MISMATCH',
+        shopCity: guard.shopCity,
+        addrCity: guard.addrCity
+      })
+    }
+  }
+
   const orderNo = genOrderNo()
   try {
     await withTx(async conn => {

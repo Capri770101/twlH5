@@ -213,7 +213,7 @@
             <img class="footer-icon footer-icon-nav" src="/images/tab-home.png" alt="店铺" />
             <span class="footer-action-text">店铺</span>
           </button>
-          <button class="footer-action footer-action-ai" @click="router.push({ name: 'advisor' })">
+          <button class="footer-action footer-action-ai" @click="goAdvisor">
             <span class="footer-ai-icon">AI</span>
             <span class="footer-action-text">花艺顾问</span>
           </button>
@@ -409,6 +409,26 @@ async function loadShop(id) {
 function goShop() {
   if (!shopId.value) { toast('店铺信息缺失'); return }
   router.push({ name: 'shop-detail', params: { id: shopId.value } })
+}
+
+/**
+ * 进 AI 顾问，并带上「我在看哪件商品 / 哪家店」的上下文。
+ *
+ * 智能体收到 entry=product + shop_id + product_id 后会锁定这家店，
+ * 推荐出来的商品必然属于同一家店 → 与收货地址同城、可以直接下单。
+ * 不带上下文时它走全平台模式，可能推荐别的城市的商品，用户点不了。
+ */
+function goAdvisor() {
+  const pid = String((flower.value && flower.value.id) || route.params.id || '').trim()
+  router.push({
+    name: 'advisor',
+    query: {
+      entry: 'product',
+      shop_id: shopId.value || '',
+      product_id: pid,
+      product_title: String((flower.value && flower.value.name) || '').slice(0, 40)
+    }
+  })
 }
 
 async function loadDetail() {

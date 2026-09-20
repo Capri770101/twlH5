@@ -99,6 +99,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { searchAll } from '@/mock/api'
+import { ensureCity } from '@/utils/city'
 import FlowerImage from '@/components/FlowerImage.vue'
 import ShopTag from '@/components/ShopTag.vue'
 import { toast } from '@/utils/toast'
@@ -134,7 +135,7 @@ async function doSearch() {
   loading.value = true
   searched.value = true
   try {
-    const res = await searchAll(kw)
+    const res = await searchAll(kw, await ensureCity())
     flowers.value = (res && res.flowers) || []
     shops.value = (res && res.shops) || []
     lastKeyword.value = kw

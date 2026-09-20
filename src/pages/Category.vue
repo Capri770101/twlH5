@@ -175,6 +175,7 @@
 import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getCategories, getFlowerList, searchAll } from '@/mock/api'
+import { ensureCity } from '@/utils/city'
 import { addToCart, money } from '@/store'
 import NavBar from '@/components/NavBar.vue'
 import StateBlock from '@/components/StateBlock.vue'
@@ -220,7 +221,8 @@ async function loadFlowers() {
   loadError.value = ''
   page.value = 1
   try {
-    const res = await getFlowerList({ categoryId: activeCategory.value, sort: sortType.value, page: 1, pageSize: PAGE_SIZE })
+    const city = await ensureCity()
+    const res = await getFlowerList({ categoryId: activeCategory.value, sort: sortType.value, page: 1, pageSize: PAGE_SIZE, city })
     flowers.value = res.list || []
     hasMore.value = !!res.hasMore
   } catch (e) {
@@ -238,7 +240,8 @@ async function loadMore() {
   loadingMore.value = true
   const next = page.value + 1
   try {
-    const res = await getFlowerList({ categoryId: activeCategory.value, sort: sortType.value, page: next, pageSize: PAGE_SIZE })
+    const city = await ensureCity()
+    const res = await getFlowerList({ categoryId: activeCategory.value, sort: sortType.value, page: next, pageSize: PAGE_SIZE, city })
     const list = res.list || []
     flowers.value = flowers.value.concat(list)
     hasMore.value = !!res.hasMore
@@ -258,7 +261,7 @@ async function loadSearch() {
   loading.value = true
   loadError.value = ''
   try {
-    const res = await searchAll(searchKeyword.value)
+    const res = await searchAll(searchKeyword.value, await ensureCity())
     flowers.value = res.flowers
     shops.value = res.shops
     hasMore.value = false

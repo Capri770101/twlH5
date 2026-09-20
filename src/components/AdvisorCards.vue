@@ -602,13 +602,42 @@ onMounted(() => {
   font-size: rpx(28);
 }
 
-/* ── 商品网格（方案卡 / DIY 封面共用）── */
+/* ── 商品横向滚动框（方案卡 / DIY 封面共用）──
+   卡片固定宽度横向排列，一屏露出约 1.9 张 —— 末尾露半张即「可左右滑动」的天然提示。
+   ⚠️ overflow-y 必须显式 hidden，否则浏览器会把 visible 提升为 auto（纵向也滚）；
+      代价是卡片投影会被纵向裁掉，故用 padding-bottom + 等量负 margin 补偿。 */
 .prods {
-  /* 助手消息列比容器窄（左侧黄铜竖线缩进），可用宽约 0.86rem：
-     两列需 2×min + gap ≤ 0.86rem，故 min 取 290rpx，仍留约 20px 余量 */
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(rpx(290), 1fr));
+  display: flex;
+  flex-wrap: nowrap;
   gap: rpx(24);
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  padding-bottom: rpx(14);
+  margin-bottom: rpx(-14);
+}
+.prods::-webkit-scrollbar { display: none; }
+/* 触屏设备（手机/平板）：藏滚动条，靠「末尾露半张卡」提示可滑。
+   但桌面/带指针设备必须把滚动条显示出来 —— 藏掉它等于把「这里能滑」的唯一线索也删了，
+   用鼠标的人根本不知道能横向滚（显出来后还能直接拖这条滚动条）。变量与 .stage 保持一致。 */
+@media (hover: hover) and (pointer: fine) {
+  .prods {
+    scrollbar-width: thin;
+    cursor: grab;
+    padding-bottom: rpx(24);
+    margin-bottom: rpx(-24);
+  }
+  .prods:active { cursor: grabbing; }
+  .prods::-webkit-scrollbar { display: block; height: rpx(10); }
+  .prods::-webkit-scrollbar-track { background: transparent; }
+  .prods::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: rpx(999); }
+}
+.prods > .prod {
+  flex: 0 0 rpx(320);
+  scroll-snap-align: start;
 }
 .prod {
   background: var(--paper-2);

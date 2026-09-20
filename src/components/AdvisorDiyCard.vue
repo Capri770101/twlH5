@@ -1,7 +1,7 @@
 <template>
   <div class="diy-card">
-    <!-- 封面：效果图 / 生成中 -->
-    <div class="diy-cover">
+    <!-- 封面：效果图 / 生成中 / 空占位 -->
+    <div class="diy-cover" :class="{ 'is-idle': !cover && !pending }">
       <img
         v-if="cover"
         class="diy-cover-img"
@@ -38,7 +38,9 @@
           <div v-for="(f, i) in d.mainFlowers" :key="'m' + i" class="fl-row">
             <span class="fl-name">{{ f.name }}</span>
             <span class="fl-out" v-if="f.inShop === false">该店暂无</span>
-            <span class="fl-qty">×{{ f.qty }}{{ f.unit }}</span>
+            <!-- 数量缺失时（模型只给了花材名、没给支数）不要渲染「×0支」——
+                 会让方案看起来像没配够花。只显示花材名即可。 -->
+            <span v-if="f.qty > 0" class="fl-qty">×{{ f.qty }}{{ f.unit }}</span>
             <span v-if="f.language" class="fl-lang">{{ f.language }}</span>
           </div>
           <div v-if="d.secRow" class="fl-row">
@@ -240,6 +242,15 @@ function showHint(t) {
   aspect-ratio: 3 / 4;
   background: var(--paper-3);
   overflow: hidden;
+}
+
+/* 还没出图、也没在生成时，不要占用 3:4 ——
+   3:4 是留给成品效果图的尺寸，空着会吃掉大半屏，把卡片下方内容（含
+   「生成效果图」按钮）顶到屏幕外；用户看到「点下方生成效果图」却找不到按钮。
+   生成中（pending）仍保留 3:4，因为那就是成品将要占据的尺寸，避免出图瞬间跳动。 */
+.diy-cover.is-idle {
+  aspect-ratio: auto;
+  height: rpx(268);
 }
 .diy-cover-img {
   width: 100%;

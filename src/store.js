@@ -17,7 +17,12 @@ const state = reactive({
   // 订单评价（本地持久化，正式待后端评价接口）
   reviews: [],
   // 优惠券（本地领取，localStorage 持久化；正式核销待后端券接口）
-  coupons: []
+  coupons: [],
+  // 当前浏览城市（城市维度：先选城市 → 再按城市筛门店与商品，localStorage 持久化）
+  // 🔴 商家后端下单会硬校验「收货城市 == 门店服务城市」，城市选错会导致付款成功后被拒单。
+  city: '',
+  // 城市是否已确定（false = 尚未取到城市列表 / 尚未选过，页面应等待而不是先拉全国数据）
+  cityReady: false
 })
 
 const CART_KEY = 'twd_cart'
@@ -25,6 +30,7 @@ const ADDRS_KEY = 'twd_addresses'
 const SEL_KEY = 'twd_selected_address'
 const TOKEN_KEY = 'twd_token'
 const USER_KEY = 'twd_userInfo'
+const CITY_KEY = 'twd_city'
 
 /**
  * 仅对「看起来是 JWT」的 token 判过期（旧式原文 token 无法判，按未过期处理）。
@@ -52,6 +58,9 @@ try {
   if (Array.isArray(addrs) && addrs.length) state.addresses = addrs
   const sel = JSON.parse(localStorage.getItem(SEL_KEY) || 'null')
   if (sel) state.selectedAddress = sel
+  // 当前浏览城市（选过后记住，下次直接进对的城市）
+  const savedCity = localStorage.getItem(CITY_KEY)
+  if (savedCity) state.city = String(savedCity).trim()
   // 登录态恢复（与小程序 app.js onLaunch 读 token/userInfo 一致）
   const token = localStorage.getItem(TOKEN_KEY)
   const userInfo = JSON.parse(localStorage.getItem(USER_KEY) || 'null')
@@ -76,6 +85,22 @@ function persistCart() {
 function persistAddr() {
   localStorage.setItem(ADDRS_KEY, JSON.stringify(state.addresses))
   localStorage.setItem(SEL_KEY, JSON.stringify(state.selectedAddress))
+}
+
+/**
+ * 设置当前浏览城市（持久化）。
+ * 城市是浏览维度而非收货维度：商品/门店/AI 推荐全部按它过滤，
+ * 结算时再校验「收货城市 == 门店城市」，与小程序「先选城市再选商品」一致。
+ */
+export function setCity(name) {
+  const c = String(name || '').trim()
+  state.city = c
+  try { localStorage.setItem(CITY_KEY, c) } catch (e) { /* 隐私模式等写入失败可忽略 */ }
+}
+
+/** 城市已确定（取到城市列表并选定/兜底）后置位，页面据此决定「等待」还是「拉数据」 */
+export function markCityReady() {
+  state.cityReady = true
 }
 
 export const cartCount = computed(() =>

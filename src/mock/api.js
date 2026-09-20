@@ -134,14 +134,36 @@ function cached(key, ttlMs, loader) {
   return promise
 }
 
-// ===== 首页 =====
-export function getHomeIndex() {
-  return cached('home', 60 * 1000, getHomeIndexReal)
+// ===== 已开通城市（城市选择器数据源）=====
+// 城市是浏览维度：先选城市 → 再按城市筛门店与商品（与小程序一致）。
+// 商家后端下单会硬校验「收货城市 == 门店服务城市」，不按城市筛选会导致付款后被拒单。
+export function getCities() {
+  return cached('cities', 5 * 60 * 1000, async () => {
+    if (REAL_API_ENABLED) {
+      try {
+        const rows = await realApi('/cities')
+        if (Array.isArray(rows) && rows.length) return rows
+      } catch (e) { if (!ALLOW_MOCK_FALLBACK) throw e; console.warn('[api] /cities 真实接口失败，回退 mock：', e && e.message) }
+    }
+    if (!ALLOW_MOCK_FALLBACK) return []
+    const m = new Map()
+    for (const s of mockData.shops) {
+      const c = String((s && s.city) || '').trim()
+      if (c) m.set(c, (m.get(c) || 0) + 1)
+    }
+    return Array.from(m, ([name, shops]) => ({ name, shops })).sort((a, b) => b.shops - a.shops)
+  })
 }
 
-async function getHomeIndexReal() {
+// ===== 首页 =====
+export function getHomeIndex(city = '') {
+  const c = String(city || '').trim()
+  return cached('home:' + c, 60 * 1000, () => getHomeIndexReal(c))
+}
+
+async function getHomeIndexReal(city = '') {
   if (REAL_API_ENABLED) {
-    try { return await realApi('/home') } catch (e) { if (!ALLOW_MOCK_FALLBACK) throw e; console.warn('[api] /home 真实接口失败，回退 mock：', e && e.message) }
+    try { return await realApi('/home', city ? { city } : undefined) } catch (e) { if (!ALLOW_MOCK_FALLBACK) throw e; console.warn('[api] /home 真实接口失败，回退 mock：', e && e.message) }
   }
   const data = { ...mockData.homeData }
   data.recommendFlowers = mockData.enrichFlowerList(mockData.flowers.slice(0, 6))
@@ -197,9 +219,9 @@ export function getCategories() {
 }
 
 // ===== 花束列表（分类/排序/分页复用） =====
-export async function getFlowerList({ categoryId = '', sort = 'default', page = 1, pageSize = 10 } = {}) {
+export async function getFlowerList({ categoryId = '', sort = 'default', page = 1, pageSize = 10, city = '' } = {}) {
   if (REAL_API_ENABLED) {
-    try { return await realApi('/flowers', { categoryId, sort, page, pageSize }) } catch (e) { if (!ALLOW_MOCK_FALLBACK) throw e; console.warn('[api] /flowers 真实接口失败，回退 mock：', e && e.message) }
+    try { return await realApi('/flowers', { categoryId, sort, page, pageSize, city }) } catch (e) { if (!ALLOW_MOCK_FALLBACK) throw e; console.warn('[api] /flowers 真实接口失败，回退 mock：', e && e.message) }
   }
   let list = [...mockData.flowers]
   if (categoryId) list = list.filter(f => f.categoryId === categoryId)
@@ -574,20 +596,21 @@ export async function getProductReviews(productId) {
   return [...local, ...SAMPLE_REVIEWS]
 }
 
-// 全部店铺列表（首页「更多花店」入口）
-export function getShopList() {
-  return cached('shops', 5 * 60 * 1000, async () => {
+// 全部店铺列表（首页「更多花店」入口；可传 city 只看该城门店）
+export function getShopList(city = '') {
+  const c = String(city || '').trim()
+  return cached('shops:' + c, 5 * 60 * 1000, async () => {
     if (REAL_API_ENABLED) {
-      try { return await realApi('/shops') } catch (e) { if (!ALLOW_MOCK_FALLBACK) throw e; console.warn('[api] /shops 真实接口失败，回退 mock：', e && e.message) }
+      try { return await realApi('/shops', c ? { city: c } : undefined) } catch (e) { if (!ALLOW_MOCK_FALLBACK) throw e; console.warn('[api] /shops 真实接口失败，回退 mock：', e && e.message) }
     }
     await delay(140)
     return mockData.shops
   })
 }
 
-export async function searchAll(keyword) {
+export async function searchAll(keyword, city = '') {
   if (REAL_API_ENABLED) {
-    try { return await realApi('/search', { q: keyword }) } catch (e) { if (!ALLOW_MOCK_FALLBACK) throw e; console.warn('[api] /search 真实接口失败，回退 mock：', e && e.message) }
+    try { return await realApi('/search', { q: keyword, city }) } catch (e) { if (!ALLOW_MOCK_FALLBACK) throw e; console.warn('[api] /search 真实接口失败，回退 mock：', e && e.message) }
   }
   const kw = (keyword || '').trim().toLowerCase()
   if (!kw) return { flowers: [], shops: [] }
@@ -1254,8 +1277,28 @@ function normalizeAdvisorResponse(r, sessionId) {
   }
 }
 
+/**
+ * 入口上下文 → 请求字段。
+ *
+ * 智能体靠这三个字段判断「用户从哪儿来」：从商品详情页进来就锁定那家店，
+ * 推荐结果自然与收货城市一致（可直接下单）；不传则走全平台模式，可能推荐到
+ * 别的城市的商品，被 H5 的城市过滤剔除后卡片就空了。
+ *
+ * 只下发有值的字段：空字符串会覆盖平台侧的会话记忆（比如同一个 session 里
+ * 第二轮没带 product_id，不该把第一轮的锁定清掉）。
+ */
+function agentEntryFields({ entry, productId, productTitle } = {}) {
+  const f = {}
+  if (entry) f.entry = entry
+  if (productId) {
+    f.product_id = productId
+    if (productTitle) f.product_title = productTitle
+  }
+  return f
+}
+
 // 主入口：优先真实智能体，失败回退 mock
-export async function chatWithAdvisor({ message, shopId = 'default', sessionId = '' }) {
+export async function chatWithAdvisor({ message, shopId = 'default', sessionId = '', entry, productId, productTitle } = {}) {
   if (AGENT_CONFIG.ready) {
     try {
       const tok = await ensureAgentToken()
@@ -1272,7 +1315,8 @@ export async function chatWithAdvisor({ message, shopId = 'default', sessionId =
           message,
           user_id: agentUserId || getExternalUid(),
           session_id: sessionId,
-          shop_id: shopId
+          shop_id: shopId,
+          ...agentEntryFields({ entry, productId, productTitle })
         }),
         signal: ctrl.signal
       })
@@ -1323,7 +1367,7 @@ function parseSseChunk(chunk) {
 //   card      → { ui, data }                   结构化卡片（plan_card/order_card/shop_card/pay_jump/image_task/greeting_card/dialog_options）
 //   done      → { session_id }                 结束，携带会话 id
 // onEvent(ev) 逐事件回调；返回 { ok, gotAny, sessionId }
-export async function streamAdvisorChat({ message, shopId = 'default', sessionId = '', onEvent, signal }) {
+export async function streamAdvisorChat({ message, shopId = 'default', sessionId = '', entry, productId, productTitle, onEvent, signal } = {}) {
   if (!AGENT_CONFIG.ready) return { ok: false, gotAny: false, sessionId }
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), 120000)
@@ -1345,7 +1389,8 @@ export async function streamAdvisorChat({ message, shopId = 'default', sessionId
         message,
         user_id: agentUserId || getExternalUid(),
         session_id: sessionId || null,
-        shop_id: shopId
+        shop_id: shopId,
+        ...agentEntryFields({ entry, productId, productTitle })
       }),
       signal: ctrl.signal
     })

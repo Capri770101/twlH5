@@ -57,6 +57,7 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { getShopList } from '@/mock/api'
+import { ensureCity } from '@/utils/city'
 import NavBar from '@/components/NavBar.vue'
 import FlowerImage from '@/components/FlowerImage.vue'
 import StateBlock from '@/components/StateBlock.vue'
@@ -73,7 +74,7 @@ async function loadShops() {
   loading.value = true
   loadError.value = ''
   try {
-    shops.value = (await getShopList()) || []
+    shops.value = (await getShopList(await ensureCity())) || []
   } catch (e) {
     shops.value = []
     loadError.value = (e && e.message) || '花店列表加载失败'

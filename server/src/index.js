@@ -7,7 +7,7 @@ import { h5DbHealth } from './h5db.js'
 import { mapFlowerRow, mapShopRow, prepareShopTrustInfo, mapReviewRow, mapUserRow } from './mapping.js'
 import {
   toFlower, toShop, isOnSale,
-  storeHome, storeCategories, storeAllFlowers, storeFlowerById, storeAllShops, storeShopFull, storeHealth
+  storeHome, storeCategories, storeAllFlowers, storeFlowerById, storeAllShops, storeShopFull, storeHealth, storeCities
 } from './store.js'
 import payRouter, { handleNotify } from './pay.js'
 import { startProfitSharingScanner } from './profitsharing.js'
@@ -218,10 +218,23 @@ app.get('/api/categories', async (req, res) => {
   }
 })
 
+// 已开通城市列表（供前端城市选择器）。城市是浏览维度：先选城市 → 再按城市筛门店与商品，
+// 与小程序行为一致。商家后端 orders/create 会硬校验「收货城市 == 门店服务城市」，
+// 所以若不按城市筛选，用户会买到别城的花 → 付款成功后被商家拒单。
+app.get('/api/cities', async (req, res) => {
+  if (READ_SOURCE !== 'api') return res.json([]) // DB 源已弃用，无城市数据
+  try {
+    res.json(await storeCities())
+  } catch (e) {
+    fail(res, e)
+  }
+})
+
 app.get('/api/home', async (req, res) => {
   if (READ_SOURCE === 'api') {
     try {
-      const h = await storeHome()
+      const city = String(req.query.city || '').trim()
+      const h = await storeHome(city)
       const banners = (h.banners || []).map((b, i) => ({
         id: String(b.id || 'b' + (i + 1)),
         title: String(b.title || ''),
@@ -235,7 +248,7 @@ app.get('/api/home', async (req, res) => {
       const categories = (h.categories || []).length ? h.categories : DEFAULT_CATEGORIES
       const recommendFlowers = (h.recommendFlowers || []).filter(isOnSale).map((p, i) => toFlower(p, { index: i }))
       const nearbyShops = (h.nearbyShops || []).map(s => toShop(s))
-      res.json({ banners, categories, recommendFlowers, nearbyShops })
+      res.json({ banners, categories, recommendFlowers, nearbyShops, city })
     } catch (e) {
       fail(res, e)
     }
@@ -269,8 +282,8 @@ app.get('/api/home', async (req, res) => {
 app.get('/api/flowers', async (req, res) => {
   if (READ_SOURCE === 'api') {
     try {
-      const { categoryId = '', sort = 'default', page = '1', pageSize = '10' } = req.query
-      const all = (await storeAllFlowers()).filter(isOnSale)
+      const { categoryId = '', sort = 'default', page = '1', pageSize = '10', city = '' } = req.query
+      const all = (await storeAllFlowers(city)).filter(isOnSale)
       const arr = categoryId ? all.filter(p => String(p.categoryId || '') === String(categoryId)) : all
       const total = arr.length
       const p = Math.max(1, parseInt(page) || 1)
@@ -349,7 +362,8 @@ function pickShopForList(shop) {
 app.get('/api/shops', async (req, res) => {
   if (READ_SOURCE === 'api') {
     try {
-      const list = (await storeAllShops()).map(s => pickShopForList(toShop(s)))
+      const city = String(req.query.city || '').trim()
+      const list = (await storeAllShops(city)).map(s => pickShopForList(toShop(s)))
       res.json(list)
     } catch (e) {
       fail(res, e)
@@ -459,13 +473,14 @@ app.get('/api/search', async (req, res) => {
     try {
       const kw = q.toLowerCase()
       const hit = (s) => s && String(s).toLowerCase().includes(kw)
-      const fAll = (await storeAllFlowers()).filter(isOnSale)
+      const city = String(req.query.city || '').trim()
+      const fAll = (await storeAllFlowers(city)).filter(isOnSale)
       const fRows = fAll.filter(p =>
         hit(p.name) || hit(p.subtitle) || hit(p.shopName) ||
         (Array.isArray(p.tags) && p.tags.some(hit)) ||
         (Array.isArray(p.flowers) && p.flowers.some(hit))
       ).slice(0, 20)
-      const sAll = await storeAllShops()
+      const sAll = await storeAllShops(city)
       const sRows = sAll.filter(s => hit(s.name) || hit(s.address) || hit(s.ipText)).slice(0, 20)
       res.json({ flowers: fRows.map(r => toFlower(r)), shops: sRows.map(s => toShop(s)) })
     } catch (e) {
