@@ -2,10 +2,15 @@
   <div class="page">
     <!-- ===== 顶部导航栏 ===== -->
     <div class="header-bar">
-      <button class="location-picker" @click="onLocationTap">
+      <!-- 城市 = 你能买到哪些城市的商品（商家只做同城配送，选错城市会在下单时被拒） -->
+      <button class="location-picker city-picker" @click="onCityTap">
         <span class="location-pin"></span>
-        <span class="location-text">{{ userAddress }}</span>
+        <span class="location-text">{{ cityLabel }}</span>
         <span class="location-arrow arrow-down"></span>
+      </button>
+      <!-- 收货地址：只决定送到哪；结算时会校验它与城市一致 -->
+      <button class="addr-chip" @click="onLocationTap">
+        <span class="addr-chip-text">{{ addrLabel }}</span>
       </button>
     </div>
 
@@ -15,6 +20,12 @@
         <span class="line-search-mark line-search-mark-compact"></span>
         <span class="search-placeholder">搜索花束、花店...</span>
       </div>
+    </div>
+
+    <!-- ===== 当前城市无可配送门店时的提示 ===== -->
+    <div v-if="!loading && !loadError && !nearbyShops.length" class="city-empty">
+      <span class="city-empty-text">{{ cityLabel }}暂未开通配送</span>
+      <button class="city-empty-btn" @click="onCityTap">切换城市</button>
     </div>
 
     <!-- ===== Banner 轮播 ===== -->
@@ -168,6 +179,7 @@
 
   </div>
   <AddressManager v-model="showAddr" />
+  <CityPicker v-model="showCity" @change="onCityChange" />
 
 </template>
 
@@ -179,8 +191,10 @@ import FlowerImage from '@/components/FlowerImage.vue'
 import ShopTag from '@/components/ShopTag.vue'
 import store, { yuan } from '@/store'
 import AddressManager from '@/components/AddressManager.vue'
+import CityPicker from '@/components/CityPicker.vue'
 import StateBlock from '@/components/StateBlock.vue'
 import { toast } from '@/utils/toast'
+import { ensureCity } from '@/utils/city'
 
 const router = useRouter()
 const rpx = n => `${n / 750}rem`
@@ -191,8 +205,17 @@ const nearbyShops = ref([])
 const recommendFlowers = ref([])
 const loading = ref(true)
 const loadError = ref('')
-const userAddress = computed(() => store.selectedAddress?.full || '请选择收货地址')
 const showAddr = ref(false)
+const showCity = ref(false)
+
+/** 当前浏览城市；未确定时显示占位，避免闪出全国数据 */
+const cityLabel = computed(() => store.city || '选择城市')
+/** 收货地址简写（城市+区，避免头顶过长） */
+const addrLabel = computed(() => {
+  const a = store.selectedAddress
+  if (!a) return '选择收货地址'
+  return [a.city, a.district].filter(Boolean).join('') || a.full || '选择收货地址'
+})
 
 const bannerRef = ref(null)
 const activeBanner = ref(0)
@@ -224,6 +247,16 @@ function onLocationTap() {
   showAddr.value = true
 }
 
+function onCityTap() {
+  showCity.value = true
+}
+
+/** 切换城市后重新取数（首页/categories 随城市变化；分类本身是全局的） */
+async function onCityChange() {
+  await loadHome()
+  toast(`已切换到 ${store.city}`)
+}
+
 function onBannerScroll(e) {
   const el = e.target
   const i = Math.round(el.scrollLeft / el.clientWidth)
@@ -234,7 +267,9 @@ async function loadHome() {
   loading.value = true
   loadError.value = ''
   try {
-    const data = await getHomeIndex()
+    // 先确定城市：商家只做同城配送，不按城市取数会推荐出买不到的商品
+    const city = await ensureCity()
+    const data = await getHomeIndex(city)
     banners.value = data.banners || []
     categories.value = data.categories || []
     nearbyShops.value = data.nearbyShops || []
@@ -300,6 +335,58 @@ onUnmounted(() => {
 }
 .location-arrow {
   margin-left: rpx(6);
+}
+
+/* 城市芯片（占左侧，可点开城市选择器） */
+.city-picker {
+  flex: 0 1 auto;
+  max-width: rpx(280);
+}
+.city-picker .location-text {
+  max-width: rpx(180);
+}
+/* 收货地址芯片（右侧，点击进地址管理） */
+.addr-chip {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  margin-left: auto;
+  padding: rpx(8) rpx(16);
+  border: none;
+  border-radius: rpx(24);
+  background: var(--bg-warm);
+  max-width: rpx(330);
+}
+.addr-chip-text {
+  font-size: rpx(22);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 当前城市无门店提示 */
+.city-empty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: rpx(16);
+  margin: rpx(16) rpx(20) 0;
+  padding: rpx(20) rpx(24);
+  border-radius: rpx(16);
+  background: var(--primary-light);
+}
+.city-empty-text {
+  font-size: rpx(24);
+  color: var(--text-secondary);
+}
+.city-empty-btn {
+  flex: 0 0 auto;
+  padding: rpx(8) rpx(20);
+  border: none;
+  border-radius: rpx(24);
+  background: var(--primary);
+  color: #fff;
+  font-size: rpx(22);
 }
 
 /* ===== 搜索栏 ===== */

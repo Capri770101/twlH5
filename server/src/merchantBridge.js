@@ -152,13 +152,25 @@ async function resolvePhone(orderId, row) {
 async function merchantToken(phone) {
   const cached = tokenCache.get(phone)
   if (cached && Date.now() - cached.at < TOKEN_TTL_MS) return cached.token
-  const r = await mfetch('/v1/auth/phone-login', {
-    method: 'POST',
-    body: { phone, code: LOGIN_CODE }
-  })
+  // 有服务间令牌时走**专用通道** `/v1/auth/service-login`（仅回环 + X-Service-Token），
+  // 不依赖商家后端 phone-login 里 `code !== '888888'` 那个短信绕过；
+  // 令牌为空时退回手机号登录（过渡期）。
+  const useService = !!SERVICE_TOKEN
+  const path = useService ? '/v1/auth/service-login' : '/v1/auth/phone-login'
+  const body = useService ? { phone } : { phone, code: LOGIN_CODE }
+  const r = await mfetch(path, { method: 'POST', body })
   const token = r.json && r.json.data && r.json.data.token
   if (!token) {
-    throw new Error('商家侧登录失败：' + ((r.json && r.json.message) || ('HTTP ' + r.status)))
+    // 🔴 登录失败 = **整条投递通道断了**（不是单笔订单的问题）。
+    //    必须让日志一眼看出是哪个通道、以及该去查什么 —— 绝不能静默失败。
+    const why = (r.json && r.json.message) || ('HTTP ' + r.status)
+    const hint = useService
+      ? '（服务令牌通道失效：确认商家后端已打 service-login 补丁，且 /opt/flower-shop/service-token.txt 与 MERCHANT_BRIDGE_SERVICE_TOKEN 完全一致）'
+      : '（手机号登录通道失效：商家后端 phone-login 的 888888 绕过可能已被移除 → 请改配 MERCHANT_BRIDGE_SERVICE_TOKEN）'
+    const err = new Error(`【投递通道断了】商家侧登录失败 ${path} :: ${why} ${hint}`)
+    err.loginChannelBroken = true
+    warn(err.message)
+    throw err
   }
   tokenCache.set(phone, { token, at: Date.now() })
   return token

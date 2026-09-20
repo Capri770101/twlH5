@@ -69,21 +69,28 @@ export function toShop(raw) {
   return s
 }
 
-/** 首页聚合数据（home/index 与我方 /api/home 契约同构） */
-export function storeHome() {
-  return withCache('home', TTL.home, () => storeFetch('/v1/home/index'))
+/** 城市参数规范化（去空格；aistore 对带不带「市」都能匹配，如「福州」与「福州市」等价） */
+function normCity(city) {
+  return String(city || '').trim()
 }
 
-/** 分类（取自首页 categories；为空回退默认 12 类） */
+/** 首页聚合数据（home/index 与我方 /api/home 契约同构）；传 city 只取该城内容 */
+export function storeHome(city = '') {
+  const c = normCity(city)
+  return withCache('home:' + c, TTL.home, () => storeFetch('/v1/home/index', c ? { city: c } : undefined))
+}
+
+/** 分类（取自首页 categories；为空回退默认 12 类）。分类是全局的，不随城市变化 */
 export async function storeCategories() {
   const h = await storeHome()
   return (h.categories || []).length ? h.categories : []
 }
 
-/** 全量商品（含所有店；约 1.2k 条。status 稀疏：只过滤显式 off 由调用方做） */
-export function storeAllFlowers() {
-  return withCache('flowers', TTL.flowers, async () => {
-    const d = await storeFetch('/v1/flowers/list')
+/** 全量商品；传 city 只取该城门店的商品。status 稀疏：只过滤显式 off 由调用方做 */
+export function storeAllFlowers(city = '') {
+  const c = normCity(city)
+  return withCache('flowers:' + c, TTL.flowers, async () => {
+    const d = await storeFetch('/v1/flowers/list', c ? { city: c } : undefined)
     return d.list || []
   })
 }
@@ -93,12 +100,31 @@ export function storeFlowerById(id) {
   return storeFetch('/v1/flowers/detail', { id })
 }
 
-/** 全量店铺列表 */
-export function storeAllShops() {
-  return withCache('shops', TTL.shops, async () => {
-    const d = await storeFetch('/v1/shops/list')
+/** 全量店铺列表；传 city 只取该城门店 */
+export function storeAllShops(city = '') {
+  const c = normCity(city)
+  return withCache('shops:' + c, TTL.shops, async () => {
+    const d = await storeFetch('/v1/shops/list', c ? { city: c } : undefined)
     return d.list || []
   })
+}
+
+/**
+ * 已开通城市列表（供前端城市选择器）。
+ * 由全量门店去重得出（复用 storeAllShops('') 的缓存，不额外打一次上游）。
+ * 返回按门店数降序：[{ name:'福州', shops:2 }, ...]
+ */
+export async function storeCities() {
+  const rows = await storeAllShops('')
+  const m = new Map()
+  for (const s of rows) {
+    const c = normCity(s && s.city)
+    if (!c) continue
+    m.set(c, (m.get(c) || 0) + 1)
+  }
+  return Array.from(m, ([name, shops]) => ({ name, shops })).sort(
+    (a, b) => b.shops - a.shops || String(a.name).localeCompare(String(b.name))
+  )
 }
 
 /** 店铺详情 + 店内目录（includeCatalog=1；不存在抛错） */
