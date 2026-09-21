@@ -298,7 +298,6 @@ import {
   chatWithAdvisor, streamAdvisorChat, pollAgentTask, normalizeAgentAssetUrl,
   isAgentRateLimited, ADVISOR_PRESETS, AGENT_CONFIG, listAgentConversations, fetchAgentMessages
 } from '@/mock/api'
-import { extractDiyPlan, isDiyScene } from '@/utils/extractDiyPlan'
 import { mergeAgentMessages, slimMessage, extractImageTaskId } from '@/utils/advisorHistory'
 import { ensureCity, cityShopIds, filterAgentMessageByCity } from '@/utils/city'
 import { toast } from '@/utils/toast'
@@ -606,7 +605,6 @@ async function sendMessage() {
           // AIGC 标识（GB 45438-2025）随 done 下发，落到消息上供界面展示
           if (d.ai_generated != null) set({ aiGenerated: !!d.ai_generated })
           if (d.content_disclosure) set({ disclosure: String(d.content_disclosure) })
-          attachDiyPlan(cur())
           attachImageTaskFromText(cur())
           applyCityFilter(cur())
         }
@@ -614,7 +612,6 @@ async function sendMessage() {
     })
 
     // 兜底：若平台没发 done（异常中断等），流结束后再尝试一次（幂等）
-    attachDiyPlan(cur())
     attachImageTaskFromText(cur())
     applyCityFilter(cur())
 
@@ -824,30 +821,6 @@ async function applyCityFilter(msg) {
   }
 }
 
-// 从流完的文本里启发式提取方案并合成 diy_plan_card（平台发了卡则跳过，不重复）
-function attachDiyPlan(msg) {
-  if (!msg || !msg.text) return
-  // 🔴 平台已下发 DIY 数据（plan_card 里含 diy:true）时**不要再从正文提取**：
-  //    否则同一个方案会被渲染两次（截图里正是重复的），且文本猜出来的版本细节远少于平台结构化数据。
-  if (hasDiyCard(msg)) return
-  if (!isDiyScene(msg.text, msg.tools)) return
-  let plan = null
-  try { plan = extractDiyPlan(msg.text) } catch (e) { plan = null }
-  if (!plan) return
-  if (!msg.cards) msg.cards = []
-  // 🔴 生图任务信息（task_id / poll）挂在**同一消息内 plan_card 的 data 顶层**，
-  //    而这张兜底卡是另一个对象，不借用的话它的 hasTask 恒为 false ——
-  //    封面会一直显示静态「定制花束」，既不提示"生成中"，也让人以为图不会来
-  //    （用户截图里那张正是这个状态）。
-  const taskSrc = (msg.cards || []).find(c => c && c.data && (c.data.task_id || c.data.poll))
-  if (taskSrc) {
-    plan.task_id = plan.task_id || taskSrc.data.task_id
-    plan.poll = plan.poll || taskSrc.data.poll
-  }
-  msg.cards.push({ ui: 'diy_plan_card', data: plan })
-  scrollToBottom()
-}
-
 /**
  * 效果图任务：按平台 /ui-contract 的 image_task 契约轮询。
  * data 形如 { task_id, poll: '/tasks/xxx', result_url }；
@@ -954,7 +927,14 @@ function startImagePoll(msg, data) {
       msg.imageStatus = st
       if (st === 'failed') msg.imageError = err || '效果图生成失败'
     }
-  })).finally(() => clearInterval(clock))
+  })).finally(() => {
+    clearInterval(clock)
+    msg._imagePolling = false
+    if (msg.imageStatus === 'processing' && !msg.image) {
+      msg.imageStatus = 'failed'
+      msg.imageError = '效果图生成超时，请稍后重新生成方案'
+    }
+  })
 }
 
 /** 刷新 / 切换会话后：把「已提交但还没出图」的效果图任务接着轮询（poll 已随消息落盘）*/
@@ -1680,14 +1660,42 @@ onMounted(() => {
   color: var(--ink-2);
 }
 
-/* ── 商品/方案卡（网格）── */
+/* ── 商品横向滚动框（方案卡 / DIY 封面共用）──
+   卡片固定宽度横向排列，一屏露出约 1.9 张 —— 末尾露半张即「可左右滑动」的天然提示。
+   ⚠️ overflow-y 必须显式 hidden，否则浏览器会把 visible 提升为 auto（纵向也滚）；
+      代价是卡片投影会被纵向裁掉，故用 padding-bottom + 等量负 margin 补偿。 */
 .prods {
-  /* 助手消息列比容器窄（左侧有黄铜竖线缩进），可用宽约 0.86rem：
-     两列需满足 2×min + gap ≤ 0.86rem，取 min=290rpx(0.3867rem) 有两列且留约 20px 余量 */
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(rpx(290), 1fr));
-  gap: rpx(24);
   margin-top: rpx(30);
+  display: flex;
+  flex-wrap: nowrap;
+  gap: rpx(24);
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  padding-bottom: rpx(14);
+  margin-bottom: rpx(-14);
+}
+.prods::-webkit-scrollbar { display: none; }
+/* 触屏设备藏滚动条（靠末尾露半张卡提示可滑）；桌面/带指针设备必须显示出来，
+   否则用鼠标的人没有任何「这里能滑」的线索。变量与 .stage 保持一致。 */
+@media (hover: hover) and (pointer: fine) {
+  .prods {
+    scrollbar-width: thin;
+    cursor: grab;
+    padding-bottom: rpx(24);
+    margin-bottom: rpx(-24);
+  }
+  .prods:active { cursor: grabbing; }
+  .prods::-webkit-scrollbar { display: block; height: rpx(10); }
+  .prods::-webkit-scrollbar-track { background: transparent; }
+  .prods::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: rpx(999); }
+}
+.prods > .prod {
+  flex: 0 0 rpx(320);
+  scroll-snap-align: start;
 }
 .prod {
   background: var(--paper-2);

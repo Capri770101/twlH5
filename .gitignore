@@ -32,3 +32,10 @@ server/config/submch.json
 
 # 临时诊断脚本（依赖本地 .env 密钥，非项目运行所需，可本地保留但勿入库）
 verify-*.mjs
+
+# Python 字节码缓存（改 deploy/patches/*.py 后本地会生成）
+__pycache__/
+*.pyc
+
+# 本地 UI 截图尚未完成敏感信息复核，不进入版本或发布包
+docs/ui-preview/

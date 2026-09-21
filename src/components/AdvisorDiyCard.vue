@@ -127,14 +127,10 @@
         <span class="price-side">参考报价 · 含手工与包装<br />实际以门店确认为准</span>
       </div>
       <div class="card-actions">
-        <!-- 🔴 平台**不总是**下发 task_id（实测同一会话里有的回复有、有的只有 plans）→ 没有任务就没有图。
-             官方 demo 的做法是给一个「生成效果图」按钮，由用户显式触发一次对话来出图。 -->
-        <button
-          v-if="!cover"
-          class="act ghost"
-          :disabled="pending"
-          @click="$emit('send', '给「' + d.name + '」这个方案生成一张效果图')"
-        >{{ pending ? '正在生成…' : '生成效果图' }}</button>
+        <!-- 后端真实 DIY 方案会在同一响应中提交生图任务并返回 task_id；
+             没有 task_id 说明不是可追踪的真实方案，不能再发一轮模糊聊天请求。 -->
+        <span v-if="!cover && !pending" class="image-note">效果图将在方案生成后自动准备</span>
+        <span v-else-if="pending" class="image-note">效果图生成中…</span>
         <button
           v-else
           class="act ghost"
@@ -188,7 +184,7 @@ const cover = computed(() => {
 })
 
 /** 是否处于「正在等效果图」状态 —— 决定封面显示 shimmer + 「生成中…」 */
-const pending = computed(() => d.value.hasTask || props.imageStatus === 'processing')
+const pending = computed(() => !cover.value && (d.value.hasTask || props.imageStatus === 'processing'))
 
 /* ── 复制 ── */
 const copyHint = ref('')
@@ -569,6 +565,12 @@ function showHint(t) {
   display: flex;
   gap: rpx(16);
   margin-top: rpx(28);
+}
+.image-note {
+  flex: 1;
+  color: var(--ink-3);
+  font-size: rpx(24);
+  line-height: 1.45;
 }
 .act {
   font: inherit;
