@@ -1,7 +1,7 @@
 # 跳舞兰AI花店 · H5
 
 > 当前交付版本：**1.0.3**。生产站点：`https://h5.tiaowulan.com/`。
-> 功能基线提交：`e4487c2`（文档更新以仓库当前 HEAD 为准）。版本记录见 [`CHANGELOG.md`](./CHANGELOG.md)，发布规范见 [`docs/RELEASE_PROCESS.md`](./docs/RELEASE_PROCESS.md)。
+> 当前文档 HEAD：`896e1d1`；功能基线提交：`e4487c2`。版本记录见 [`CHANGELOG.md`](./CHANGELOG.md)，发布规范见 [`docs/RELEASE_PROCESS.md`](./docs/RELEASE_PROCESS.md)。
 
 AI 驱动的线上花店 H5，提供选花、下单、店铺浏览与 AI 花艺顾问一站式体验。技术栈 **Vue 3 + Vite + Sass**。
 
