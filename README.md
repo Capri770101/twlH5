@@ -1,13 +1,13 @@
 # 跳舞兰AI花店 · H5
 
 > 当前交付版本：**1.0.3**。生产站点：`https://h5.tiaowulan.com/`。
-> 最新 H5 提交：`e4487c2`。版本记录见 [`CHANGELOG.md`](./CHANGELOG.md)，发布规范见 [`docs/RELEASE_PROCESS.md`](./docs/RELEASE_PROCESS.md)。
+> 功能基线提交：`e4487c2`（文档更新以仓库当前 HEAD 为准）。版本记录见 [`CHANGELOG.md`](./CHANGELOG.md)，发布规范见 [`docs/RELEASE_PROCESS.md`](./docs/RELEASE_PROCESS.md)。
 
 AI 驱动的线上花店 H5，提供选花、下单、店铺浏览与 AI 花艺顾问一站式体验。技术栈 **Vue 3 + Vite + Sass**。
 
-数据层采用「前端 mock + 可选 Node 只读后端」双轨：
-- 默认走 `src/mock/` 假数据，开箱即用；
-- 配置 `VITE_USE_REAL_API=true` 后，读接口优先走 `server/`（`/api` 同源代理），连不上库时自动回退 mock。
+数据层采用「开发 mock + 生产 Node API / 商家服务桥接」双轨：
+- 本地开发可使用 `src/mock/` 假数据；
+- 生产通过 `server/` 的 `/api` 与商家服务桥接访问真实商品、用户和订单链路；关键写操作不得静默回退 mock。
 
 AI 花艺顾问已接入**自研智能体平台 `https://api.tiaowulan.com`**（流式输出 + 结构化卡片）。
 
@@ -129,14 +129,14 @@ n rpx = n / 750 rem
 
 底部 TabBar（首页 / 购物车 / 我的）已完成，购物车角标与详情页加购实时联动。
 
-## Node 后端 `server/`（MySQL 只读）
+## Node 后端 `server/`
 
-持有 MySQL 连接，前端经 Vite `/api` 同源代理调用，账号密码只在服务端，浏览器不持库密码。
+持有 MySQL 与商家服务连接，前端经 `/api` 同源代理调用，账号密码和服务令牌只在服务端，浏览器不持密钥。
 
 - **技术**：Express + `mysql2`（连接池，SSL `rejectUnauthorized:false` 仅加密不校 CA）
 - **端口**：`API_PORT`，默认 `4000`（与 `vite.config.js` 的 `/api` 代理目标一致，`API_PROXY_TARGET` 可覆盖）
 - **只读接口**：`/api/health`、`/api/meta/tables`、`/api/meta/columns?table=`（schema 发现）、`/api/home`、`/api/flowers`(+`/:id`)、`/api/categories`、`/api/shops/:id`(+`/reviews`)、`/api/search?q=`、`/api/users`（脱敏）
-- **兜底**：DB 不可达时路由返回 `{error}`，前端 `realApi()` 捕获后回退 `src/mock/` 假数据，页面照常显示
+- **兜底边界**：开发读接口可以回退 mock；登录、订单、支付、退款等生产写链路必须明确失败，不得伪造成功。
 - **真实库 schema（已通过智能体核实）**：仅 3 张表 `products` / `shop_products` / `shops`；`products` 列含 `name/subtitle/description/price/original_price/stock/sales/rating/image/images/tags/flowers/flower_meaning/season/shelf_life/owner_shop_id`，价格单位为**元**。当前 `server/src/mapping.js` 按 `flowers/categories/reviews/orders` 假设字段，连真库时需按这 3 表重写（部署前先 `GET /api/meta/tables` + `/api/meta/columns` 校准）
 - **用户表模板**：`server/sql/users.sql`（`CREATE TABLE IF NOT EXISTS users`，幂等），对应只读 `GET /api/users` 经 `mapUserRow` 脱敏（手机号 `138****8888`、openid 掩码、密码/令牌不返回）
 - **白名单**：MySQL「允许来源」为 `8.138.203.6`。`server/` 须跑在该机或把本机 IP 加入白名单，否则连不上库（前端回退 mock）。本机 `node server/src/index.js` 验证：`GET /api/health` 显示 `dbConnected`
@@ -187,8 +187,8 @@ n rpx = n / 750 rem
 ## 待办 / 已知限制
 
 - **真实数据**：`server/` 只读接口已接，但仅当后端跑在 MySQL 白名单机器（`8.138.203.6`）或本机 IP 加入白名单时才连真库；否则前端回退 mock。生产二选一：把 `server/` 部署到白名单机器，或白名单加本机 IP。`server/src/mapping.js` 需按真实 3 表（`products`/`shop_products`/`shops`）重写方能对齐真库。
-- **智能体生产接入**：平台开 CORS，或部署侧加同源代理（见顾问对接段）。
-- **写接口仍为 mock**：登录、下单、支付、真实用户写入等写操作当前是 mock（DB 为只读账号）；用户数据待连库后由 `GET /api/users` 提供。
+- **智能体生产接入**：当前使用同源 `/agent` 代理；不要改成浏览器携带生产 API Key 直连。
+- **订单链路**：H5 Node API 已通过服务间登录桥接商家后端；生产改动和补丁见 `deploy/patches/`。静态前端发布不得重启或改写商家服务。
 - **库内现多为测试数据**：经智能体核实，`products` 表中存在「随机花瓶一个」「测试」等样例行，接真库后替换即可。
 - **DIY 成交**：当前 DIY 卡支持复制后端提供的 `copy_text` 用料清单；尚未接平台定制订单、付款和分账接口。
 - **AI 生图**：真实 DIY 方案由后端同一轮提交生图任务，前端轮询 `task_id/poll`；前端不再从自然语言猜 DIY 卡。
