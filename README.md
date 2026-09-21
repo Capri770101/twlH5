@@ -1,5 +1,8 @@
 # 跳舞兰AI花店 · H5
 
+> 当前交付版本：**1.0.3**。生产站点：`https://h5.tiaowulan.com/`。
+> 最新 H5 提交：`e4487c2`。版本记录见 [`CHANGELOG.md`](./CHANGELOG.md)，发布规范见 [`docs/RELEASE_PROCESS.md`](./docs/RELEASE_PROCESS.md)。
+
 AI 驱动的线上花店 H5，提供选花、下单、店铺浏览与 AI 花艺顾问一站式体验。技术栈 **Vue 3 + Vite + Sass**。
 
 数据层采用「前端 mock + 可选 Node 只读后端」双轨：
@@ -7,6 +10,15 @@ AI 驱动的线上花店 H5，提供选花、下单、店铺浏览与 AI 花艺�
 - 配置 `VITE_USE_REAL_API=true` 后，读接口优先走 `server/`（`/api` 同源代理），连不上库时自动回退 mock。
 
 AI 花艺顾问已接入**自研智能体平台 `https://api.tiaowulan.com`**（流式输出 + 结构化卡片）。
+
+交付边界：H5 负责展示和交互；智能体负责理解、事实查询、DIY 方案和生图任务；商家后端负责商品、订单、支付和履约。DIY 方案当前不是现成 SKU，不直接进入现货结算。
+
+## 交付方 AI 快速阅读
+
+1. 先读本 README、`CHANGELOG.md` 和 `docs/RELEASE_PROCESS.md`。
+2. 顾问链路重点看 `src/pages/Advisor.vue`、`src/components/AdvisorCards.vue`、`src/components/AdvisorDiyCard.vue`、`src/utils/diyPlan.js`。
+3. 智能体接口和生图契约看智能体仓库 `DELIVERY.md`、`docs/05-前端对接契约.md`。
+4. 生产静态目标是 `/opt/twlh5-h5/dist`；发布只重启 `twlh5-static`，不要为静态发布重启 `twlh5-api` 或 `flower-shop`。
 
 ## 快速开始
 
@@ -150,9 +162,7 @@ n rpx = n / 750 rem
   - `text` 文本气泡
 - **多会话管理**：`Advisor.vue` 左侧抽屉 `≡` 管理，会话存 `localStorage`（`twd_advisor_convos`，最多 30 个会话、每会话最多 40 条）；支持新建 / 切换 / 重命名（prompt）/ 删除；首条用户消息自动命名，发送后写回 `updatedAt`/`sessionId`/`agentMode`
 - **开发态**：`vite.config.js` 配 `server.proxy['/agent']` → `https://api.tiaowulan.com`，H5 走同源 `/agent/*` 免浏览器 CORS，key 不进 bundle
-- **生产态**：平台目前未返回 `Access-Control-Allow-Origin`，浏览器直连会被拦 → 二选一：
-  - 平台开 CORS 并设 `VITE_AGENT_API_BASE=https://api.tiaowulan.com`（key 由 `VITE_AGENT_API_KEY` 暴露，平台 Key 即为此设计）
-  - 或部署侧加同源代理（Cloudflare Pages Functions / Netlify / Vercel rewrite），把 `/agent` 转到平台并在服务端注入 `X-API-Key`，浏览器不持 key
+- **生产态**：通过 H5 服务端 / Nginx 同源代理访问 `/agent`；浏览器不直接持有平台 Key。不要把生产 Key 写入构建产物。
 
 ## 环境变量 `.env`
 
@@ -180,6 +190,8 @@ n rpx = n / 750 rem
 - **智能体生产接入**：平台开 CORS，或部署侧加同源代理（见顾问对接段）。
 - **写接口仍为 mock**：登录、下单、支付、真实用户写入等写操作当前是 mock（DB 为只读账号）；用户数据待连库后由 `GET /api/users` 提供。
 - **库内现多为测试数据**：经智能体核实，`products` 表中存在「随机花瓶一个」「测试」等样例行，接真库后替换即可。
+- **DIY 成交**：当前 DIY 卡支持复制后端提供的 `copy_text` 用料清单；尚未接平台定制订单、付款和分账接口。
+- **AI 生图**：真实 DIY 方案由后端同一轮提交生图任务，前端轮询 `task_id/poll`；前端不再从自然语言猜 DIY 卡。
 
 ## 环境坑
 
