@@ -131,6 +131,7 @@
              没有 task_id 说明不是可追踪的真实方案，不能再发一轮模糊聊天请求。 -->
         <span v-if="!cover && !pending" class="image-note">效果图将在方案生成后自动准备</span>
         <span v-else-if="pending" class="image-note">效果图生成中…</span>
+        <button v-if="d.copyText" class="act ghost" @click="copy(d.copyText)">{{ copyHint || '复制用料清单' }}</button>
         <button
           v-else
           class="act ghost"

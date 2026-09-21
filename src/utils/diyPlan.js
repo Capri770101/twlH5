@@ -124,6 +124,7 @@ export function normalizeDiyPlan(raw, top = {}) {
   // ── 效果图
   const coverImage = p.effect_image_url || p.image_url || t.effect_image_url || ''
   const hasTask = !!(p.task_id || p.poll || t.task_id || t.poll)
+  const copyText = String(p.copy_text || p.copyText || '').trim()
 
   // ── 标签
   const chips = []
@@ -142,6 +143,7 @@ export function normalizeDiyPlan(raw, top = {}) {
     name: p.name || '定制方案',
     desc: p.desc || '',
     coverImage,
+    copyText,
     hasTask,
     priceText,
     priceNum: totalNum,
