@@ -1,6 +1,6 @@
 # 跳舞兰AI花店 · H5
 
-> 当前交付版本：**1.0.3**。生产站点：`https://h5.tiaowulan.com/`。
+> 当前交付版本：**1.0.4**。域名停用期间测试入口：`http://129.204.85.139/`；域名恢复后使用 `https://h5.tiaowulan.com/`。
 > 当前文档 HEAD：`896e1d1`；功能基线提交：`e4487c2`。版本记录见 [`CHANGELOG.md`](./CHANGELOG.md)，发布规范见 [`docs/RELEASE_PROCESS.md`](./docs/RELEASE_PROCESS.md)。
 
 AI 驱动的线上花店 H5，提供选花、下单、店铺浏览与 AI 花艺顾问一站式体验。技术栈 **Vue 3 + Vite + Sass**。
@@ -143,7 +143,7 @@ n rpx = n / 750 rem
 
 ## AI 花艺顾问对接说明（自研智能体平台）
 
-- **平台**：`https://api.tiaowulan.com`（ReAct 架构，OpenAPI `/openapi.json`，UI 契约 `/ui-contract`）
+- **平台**：当前域名停用时使用 `https://49.232.49.176`；域名恢复后可切回域名（ReAct 架构，UI 契约 `/ui-contract`）
 - **鉴权**：`X-API-Key`（平台 Key，存前端 `.env` 的 `VITE_AGENT_API_KEY`）→ `POST /auth/token` 换 Bearer token
 - **流式输出**：`POST /chat/stream` 返回 `text/event-stream`，事件四种：
   - `tool_call {name,status}`（如 `platform_db_query_entity`，页面显示「正在查询花库…」）
@@ -161,7 +161,7 @@ n rpx = n / 750 rem
   - `dialog_options` 选项 chips：点选回传继续对话
   - `text` 文本气泡
 - **多会话管理**：`Advisor.vue` 左侧抽屉 `≡` 管理，会话存 `localStorage`（`twd_advisor_convos`，最多 30 个会话、每会话最多 40 条）；支持新建 / 切换 / 重命名（prompt）/ 删除；首条用户消息自动命名，发送后写回 `updatedAt`/`sessionId`/`agentMode`
-- **开发态**：`vite.config.js` 配 `server.proxy['/agent']` → `https://api.tiaowulan.com`，H5 走同源 `/agent/*` 免浏览器 CORS，key 不进 bundle
+- **开发态**：`vite.config.js` 配 `server.proxy['/agent']` → 可配置的智能体地址，H5 走同源 `/agent/*` 免浏览器 CORS，key 不进 bundle
 - **生产态**：通过 H5 服务端 / Nginx 同源代理访问 `/agent`；浏览器不直接持有平台 Key。不要把生产 Key 写入构建产物。
 
 ## 环境变量 `.env`

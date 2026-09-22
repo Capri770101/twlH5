@@ -2,7 +2,7 @@
 // 用法： PORT=8088 node server.cjs
 // 功能：
 //   1) 静态托管同目录 dist/（SPA：未知路径 fallback index.html）
-//   2) /agent/* 透传到 https://api.tiaowulan.com/*（与 Vite dev 代理一致，strip /agent 前缀）
+//   2) /agent/* 透传到 AGENT_TARGET（与 Vite dev 代理一致，strip /agent 前缀）
 //      —— 🔐 平台 X-API-Key 只存在于本服务（环境变量 AGENT_API_KEY），由反代统一注入；
 //         前端 bundle 不持有密钥（打包后浏览器可见即等于公开）。
 // 注意：监听高位端口，无需 root；正式 HTTPS/80 由 nginx（root）另行配置。
@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 8088
 const DIST = path.join(__dirname, 'dist')
 // 智能体平台地址：走环境变量 —— 便于「智能体单独部署到另一台机器」时只改配置、不改代码。
 // 支持 http（智能体在内网时）与 https 两种协议。
-const AGENT_TARGET = (process.env.AGENT_TARGET || 'https://api.tiaowulan.com').replace(/\/+$/, '')
+const AGENT_TARGET = (process.env.AGENT_TARGET || 'https://49.232.49.176').replace(/\/+$/, '')
 const agentClient = new URL(AGENT_TARGET).protocol === 'http:' ? http : https
 // 智能体平台凭证：仅服务端可见（放 /opt/twlh5-h5/.env，由 systemd EnvironmentFile 注入）
 // 未配置时不注入该头，便于智能体在内网免鉴权时直接连通。
