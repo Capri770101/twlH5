@@ -23,6 +23,9 @@ Environment=PORT=8088
 # 智能体平台地址：若后续把智能体部署到另一台机器，只改这里（支持 http/https）
 # 当前域名停用时使用智能体服务器 IP；域名恢复后可由 /opt/twlh5-h5/.env 覆盖。
 Environment=AGENT_TARGET=https://49.232.49.176
+# 上游通过 IP 连接，TLS/HTTP 仍使用证书和 Nginx 路由对应的旧域名；不关闭 TLS 校验。
+Environment=AGENT_TLS_SERVERNAME=api.tiaowulan.com
+Environment=AGENT_HOST_HEADER=api.tiaowulan.com
 # 覆盖式配置（放 AGENT_TARGET / AGENT_API_KEY）；文件不存在也不报错
 EnvironmentFile=-/opt/twlh5-h5/.env
 ExecStart=/usr/local/bin/node server.cjs

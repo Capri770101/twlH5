@@ -18,6 +18,9 @@ const DIST = path.join(__dirname, 'dist')
 // 支持 http（智能体在内网时）与 https 两种协议。
 const AGENT_TARGET = (process.env.AGENT_TARGET || 'https://49.232.49.176').replace(/\/+$/, '')
 const agentClient = new URL(AGENT_TARGET).protocol === 'http:' ? http : https
+// 当上游用 IP 访问、但证书仍签发给旧域名时，显式保留 TLS SNI；不关闭证书校验。
+const AGENT_TLS_SERVERNAME = process.env.AGENT_TLS_SERVERNAME || ''
+const AGENT_HOST_HEADER = process.env.AGENT_HOST_HEADER || ''
 // 智能体平台凭证：仅服务端可见（放 /opt/twlh5-h5/.env，由 systemd EnvironmentFile 注入）
 // 未配置时不注入该头，便于智能体在内网免鉴权时直接连通。
 const AGENT_API_KEY = process.env.AGENT_API_KEY || ''
@@ -167,11 +170,12 @@ function proxyAgent(req, res) {
   }
   const targetPath = req.url.replace(/^\/agent/, '') || '/'
   const targetUrl = new URL(targetPath, AGENT_TARGET)
-  const headers = { ...req.headers, host: targetUrl.host }
+  const headers = { ...req.headers, host: AGENT_HOST_HEADER || targetUrl.host }
   // 🔐 一律以服务端凭证为准：有则覆盖（并丢弃前端可能带来的伪造值），无则删除
   if (AGENT_API_KEY) headers['x-api-key'] = AGENT_API_KEY
   else delete headers['x-api-key']
   const options = { method: req.method, headers }
+  if (AGENT_TLS_SERVERNAME && agentClient === https) options.servername = AGENT_TLS_SERVERNAME
   const upstream = agentClient.request(targetUrl, options, (upRes) => {
     // SSE / 长连接：显式告知反代层不要缓冲（nginx 需配 proxy_buffering off 双保险）
     res.setHeader('X-Accel-Buffering', 'no')
