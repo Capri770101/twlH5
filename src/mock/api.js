@@ -1173,6 +1173,21 @@ async function ensureAgentToken() {
 
 // ===== 会话历史（跨设备同步用；智能体平台按 user_id 存会话）=====
 
+async function greetingRequest(endpoint, payload, signal) {
+  const token = await ensureAgentToken()
+  if (!agentUserId) throw new Error('未取得贺卡用户身份')
+  const response = await fetch(AGENT_CONFIG.apiBase + '/greetings/' + endpoint, {
+    method: 'POST', signal,
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ ...payload, user_id: agentUserId })
+  })
+  if (!response.ok) throw await agentHttpError(response, 'greeting')
+  return response.json()
+}
+
+export const draftGreeting = (payload, signal) => greetingRequest('draft', payload, signal)
+export const renderGreeting = (payload, signal) => greetingRequest('render', payload, signal)
+
 /** 当前账号在智能体平台的会话列表（新→旧） */
 export async function listAgentConversations() {
   if (!AGENT_CONFIG.ready) return []

@@ -139,12 +139,14 @@
         >换个配色</button>
         <button class="act" @click="$emit('save', d)">保存到我的方案</button>
       </div>
+      <GreetingEditor :plan="plan" />
     </div>
   </div>
 </template>
 
 <script setup>
 import { computed, ref } from 'vue'
+import GreetingEditor from '@/components/GreetingEditor.vue'
 import { AGENT_CONFIG } from '@/mock/api'
 import { normalizeAgentAssetUrl } from '@/utils/agentAsset'
 import { normalizeDiyPlan, hexOfColor } from '@/utils/diyPlan'
