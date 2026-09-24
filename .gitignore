@@ -39,3 +39,7 @@ __pycache__/
 
 # 本地 UI 截图尚未完成敏感信息复核，不进入版本或发布包
 docs/ui-preview/
+
+# 本地预览用：预览服务器脚本与设计稿预览页，仅供本地看效果，不入库
+.preview-server.mjs
+redesign-preview.html

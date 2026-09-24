@@ -1,0 +1,1749 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>跳舞兰 · 全站高保真效果图 v0.4 · 文艺克制</title>
+<style>
+/* ============================================================
+   跳舞兰 AI 花店 · 全站高保真效果图 v0.4「文艺克制 · 东方高端」
+   ------------------------------------------------------------
+   设计语言四要素：宋体 · 留白 · 发丝线 · 一点朱砂
+   对标实测：观夏 tosummer（衬线+留白+零阴影零圆角）
+             ROSEONLY（黑白灰+单一红，价格不用红不加粗）
+             WeUI（文字用 rgba 黑透明度体系）
+   承接：redesign-preview.html v0.3（同方向，扩为全站 14 屏）
+   ============================================================ */
+:root{
+  --paper:#f6f1e7;        /* 宣纸 · 页面底 */
+  --paper-deep:#ebe3d3;   /* 深一度纸色 · 图区底 */
+  --ink:#23221d;          /* 墨 · 标题正文 */
+  --ink-mid:#544e44;      /* 淡墨 · 次级文字 */
+  --ink-soft:#675f51;     /* 远墨 · 弱文字 */
+  --hairline:#d5ccb9;     /* 发丝线 · 分隔 */
+  --border:#bfb39a;       /* 边框 · 器物 */
+  --crimson:#93372b;      /* 朱砂 · 唯一强调色 */
+  --crimson-soft:#ecdfd6; /* 朱砂淡底 */
+  --moss:#55644a;         /* 苔色 · 营业/成功态，仅此一处 */
+  --canvas:#cfc5b0;       /* 画布置底 */
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:var(--canvas);color:var(--ink);
+  font-family:"Songti SC","STSong","Noto Serif SC","Source Han Serif SC",SimSun,Georgia,serif;
+  -webkit-font-smoothing:antialiased;
+}
+.sans{font-family:Inter,-apple-system,"PingFang SC","Helvetica Neue","Microsoft YaHei",sans-serif}
+
+/* ---------- 画布与页头 ---------- */
+.stage{min-height:100vh;padding:48px 24px 96px;display:flex;justify-content:center}
+.board{width:min(1720px,100%)}
+.board-head{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:20px;padding:0 4px;flex-wrap:wrap;gap:16px}
+.kicker{font-size:11px;letter-spacing:.3em;color:var(--crimson)}
+.board-title{font-size:34px;font-weight:600;letter-spacing:.06em;margin-top:14px}
+.board-desc{margin-top:10px;font-size:12px;color:var(--ink-mid);letter-spacing:.08em;line-height:2}
+.edition{font-size:11px;letter-spacing:.22em;color:var(--ink-soft);text-align:right;line-height:2}
+.board-rule{height:2px;background:var(--ink);opacity:.85;margin:26px 4px 0}
+
+/* ---------- 章节目录 ---------- */
+.toc{display:flex;gap:28px;flex-wrap:wrap;margin:22px 4px 0;font-size:11px;letter-spacing:.12em;color:var(--ink-mid)}
+.toc a{color:inherit;text-decoration:none;border-bottom:1px solid transparent;padding-bottom:2px}
+.toc a:hover{color:var(--crimson);border-bottom-color:var(--crimson)}
+
+/* ---------- 章节头 ---------- */
+.chapter{margin-top:88px}
+.ch-head{display:flex;align-items:baseline;gap:18px;padding:0 4px}
+.ch-no{font-size:11px;letter-spacing:.3em;color:var(--crimson)}
+.ch-title{font-size:24px;font-weight:600;letter-spacing:.14em}
+.ch-line{flex:1;height:1px;background:var(--border)}
+.ch-desc{padding:12px 4px 0;font-size:11px;color:var(--ink-mid);letter-spacing:.1em;line-height:2.1;max-width:760px}
+
+/* ---------- 屏排列 ---------- */
+.row{display:flex;flex-wrap:wrap;gap:56px 48px;margin-top:40px;align-items:flex-start}
+.frame-wrap{width:375px;flex:none}
+.phone{
+  width:375px;background:var(--paper);position:relative;overflow:hidden;
+  border:1px solid var(--border);border-radius:34px;
+  box-shadow:0 0 0 7px #26251f, 0 32px 60px rgba(38,37,31,.34);
+}
+.screen{min-height:760px;display:flex;flex-direction:column}
+.cap{margin-top:26px;padding:0 6px}
+.cap-no{font-size:10px;letter-spacing:.3em;color:var(--crimson)}
+.cap-name{font-size:16px;font-weight:600;letter-spacing:.12em;margin-top:8px}
+.cap-note{font-size:11px;color:var(--ink-mid);letter-spacing:.06em;line-height:2;margin-top:6px}
+
+/* ---------- 状态栏 ---------- */
+.st{height:46px;display:flex;justify-content:space-between;align-items:center;padding:0 26px;font-size:11px;flex:none}
+.st b{font-weight:600}
+
+/* ---------- 导航栏 ---------- */
+.nav{display:flex;align-items:center;gap:14px;padding:6px 26px 14px;flex:none}
+.nav-back{width:10px;height:10px;border-left:1.5px solid var(--ink);border-bottom:1.5px solid var(--ink);transform:rotate(45deg);flex:none;cursor:pointer}
+.nav-t{flex:1;font-size:15px;letter-spacing:.24em;font-weight:600}
+.nav-r{font-size:11px;color:var(--ink-mid);letter-spacing:.14em;cursor:pointer;white-space:nowrap}
+.nav-rule{height:1px;background:var(--ink);opacity:.85;margin:0 26px}
+
+/* ---------- 首页 masthead ---------- */
+.masthead{padding:14px 26px 0;flex:none}
+.masthead-top{display:flex;justify-content:space-between;align-items:center}
+.brand{font-size:21px;letter-spacing:.3em;font-weight:600}
+.city{font-size:11px;color:var(--ink-soft);letter-spacing:.08em;cursor:pointer}
+.city b{color:var(--ink);font-weight:600}
+.masthead-sub{margin-top:8px;font-size:10px;letter-spacing:.36em;color:var(--ink-soft)}
+.masthead-rule{margin-top:16px;height:2px;background:var(--ink);opacity:.85}
+
+/* ---------- 搜索 ---------- */
+.search{margin:22px 26px 0;border-bottom:1px solid var(--hairline);padding:10px 0;display:flex;align-items:center;gap:10px;color:var(--ink-soft);font-size:12px;letter-spacing:.1em;cursor:pointer}
+.search i{width:12px;height:12px;border:1.5px solid var(--ink-soft);border-radius:50%;position:relative;flex:none}
+.search i:after{content:"";position:absolute;width:5px;height:1.5px;background:var(--ink-soft);transform:rotate(45deg);right:-4px;bottom:-2px}
+.search em{font-style:normal;margin-left:auto;font-size:11px;letter-spacing:.2em;color:var(--ink)}
+
+/* ---------- hero ---------- */
+.hero{margin:34px 26px 0;padding-bottom:30px;border-bottom:1px solid var(--hairline);position:relative}
+.hero-date{font-size:11px;letter-spacing:.3em;color:var(--crimson)}
+.hero h2{font-size:26px;line-height:1.75;font-weight:600;letter-spacing:.1em;margin-top:16px;max-width:230px}
+.hero p{font-size:11px;color:var(--ink-soft);letter-spacing:.2em;margin-top:12px}
+.hero-cta{margin-top:22px;background:none;border:none;padding:0 0 4px;border-bottom:1px solid var(--ink);
+  font-family:inherit;font-size:11px;letter-spacing:.3em;color:var(--ink);cursor:pointer}
+.hero svg,.deco-svg{position:absolute;right:0;bottom:26px;width:74px;height:96px}
+
+/* ---------- AI 入口行 ---------- */
+.ai-line{display:flex;align-items:baseline;gap:12px;margin:26px 26px 0;padding:16px 0;border-top:1px solid var(--hairline);border-bottom:1px solid var(--hairline);cursor:pointer}
+.ai-glyph{color:var(--crimson);font-size:14px}
+.ai-line strong{font-size:13px;letter-spacing:.12em;font-weight:600}
+.ai-line small{font-size:11px;color:var(--ink-soft);letter-spacing:.12em;margin-left:auto;white-space:nowrap}
+
+/* ---------- 栏目 ---------- */
+.sec{padding:32px 26px 0}
+.sec-head{display:flex;align-items:baseline;gap:12px;margin-bottom:20px}
+.sec-title{font-size:15px;letter-spacing:.28em;font-weight:600}
+.sec-line{flex:1;height:1px;background:var(--hairline);transform:translateY(-4px)}
+.sec-more{font-size:11px;color:var(--ink-soft);letter-spacing:.14em;white-space:nowrap;cursor:pointer}
+
+/* ---------- 场景 tab ---------- */
+.scenes{display:flex;border-top:1px solid var(--hairline)}
+.scene{flex:1;text-align:center;padding:13px 0;font-size:12px;letter-spacing:.18em;color:var(--ink-soft);
+  border-bottom:1px solid var(--hairline);cursor:pointer;position:relative}
+.scene + .scene{border-left:1px solid var(--hairline)}
+.scene.active{color:var(--ink);font-weight:600}
+.scene.active:after{content:"";position:absolute;left:50%;bottom:-1px;transform:translateX(-50%);width:26px;height:1px;background:var(--crimson)}
+
+/* ---------- 花店名单行 ---------- */
+.shops{border-top:1px solid var(--hairline)}
+.shop{display:flex;align-items:center;gap:14px;padding:15px 0;border-bottom:1px solid var(--hairline);cursor:pointer}
+.shop-dot{width:6px;height:6px;border-radius:50%;background:var(--crimson);flex:none;opacity:.55}
+.shop-body{flex:1;min-width:0}
+.shop-name{font-size:14px;letter-spacing:.1em;font-weight:600}
+.shop-meta{font-size:11px;color:var(--ink-soft);letter-spacing:.1em;margin-top:5px}
+.shop-dist{font-size:11px;color:var(--ink-soft);letter-spacing:.06em;flex:none}
+.open-dot{width:5px;height:5px;border-radius:50%;background:var(--moss);display:inline-block;margin-right:5px}
+
+/* ---------- 花束素卡 ---------- */
+.gallery{display:grid;grid-template-columns:1fr 1fr;gap:20px 16px}
+.piece{cursor:pointer}
+.piece-art{aspect-ratio:1/1.06;display:grid;place-items:center;font-size:46px;background:var(--paper-deep);border:1px solid var(--hairline);position:relative}
+.piece-name{font-size:13px;letter-spacing:.1em;font-weight:600;margin-top:11px}
+.piece-sub{font-size:10px;color:var(--ink-soft);letter-spacing:.1em;margin-top:4px}
+.piece-foot{display:flex;justify-content:space-between;align-items:baseline;margin-top:9px}
+.piece-price{font-size:14px;color:var(--crimson)}
+.piece-price small{font-size:10px;color:var(--ink-soft);text-decoration:line-through;margin-left:5px}
+.piece-like{font-size:10px;color:var(--ink-soft)}
+.piece-add{position:absolute;right:8px;bottom:8px;width:26px;height:26px;border:1px solid var(--ink);border-radius:50%;
+  background:var(--paper);display:grid;place-items:center;font-size:13px;color:var(--ink);cursor:pointer}
+.art-tag{position:absolute;left:0;top:0;background:var(--paper);border-right:1px solid var(--hairline);border-bottom:1px solid var(--hairline);
+  font-size:9px;letter-spacing:.2em;color:var(--crimson);padding:4px 8px}
+
+/* ---------- 底部 TabBar ---------- */
+.tabbar{margin-top:auto;height:82px;background:var(--paper);border-top:1px solid var(--hairline);
+  display:flex;justify-content:space-around;align-items:center;flex:none}
+.tab{font-size:11px;letter-spacing:.22em;color:var(--ink-soft);cursor:pointer;position:relative;text-align:center;padding:6px 4px}
+.tab.active{color:var(--ink);font-weight:600}
+.tab.active:before{content:"";position:absolute;left:50%;top:-4px;transform:translateX(-50%);width:4px;height:4px;border-radius:50%;background:var(--crimson)}
+.tab .badge{position:absolute;top:-2px;right:-10px;min-width:16px;height:16px;background:var(--crimson);color:#fff;border-radius:7px;
+  font-size:9px;display:grid;place-items:center;padding:0 3px}
+
+/* ---------- 通用底部操作栏 ---------- */
+.bottombar{margin-top:auto;border-top:1px solid var(--hairline);background:var(--paper);padding:14px 26px calc(14px + 8px);
+  display:flex;align-items:center;gap:14px;flex:none}
+.bb-fav{display:flex;flex-direction:column;align-items:center;gap:4px;font-size:10px;color:var(--ink-soft);letter-spacing:.1em;cursor:pointer;flex:none}
+.bb-fav i{font-style:normal;font-size:16px}
+.bb-sum{flex:1;min-width:0}
+.bb-sum .k{font-size:10px;color:var(--ink-soft);letter-spacing:.2em}
+.bb-sum .v{font-size:19px;color:var(--crimson);margin-top:2px}
+.bb-sum .v small{font-size:11px}
+.bb-acts{display:flex;gap:10px;flex:none}
+
+/* ---------- 按钮 ---------- */
+.btn{display:inline-flex;align-items:center;justify-content:center;font-family:Inter,-apple-system,"PingFang SC",sans-serif;
+  font-size:11px;letter-spacing:.22em;padding:13px 24px;cursor:pointer;border:1px solid var(--ink);background:var(--ink);color:var(--paper);white-space:nowrap}
+.btn.ghost{background:none;color:var(--ink)}
+.btn.red{background:var(--crimson);border-color:var(--crimson);color:#fdf8f4}
+.btn.hair{border-color:var(--border);background:none;color:var(--ink-mid)}
+.btn.block{width:100%}
+.btn.sm{padding:8px 14px;font-size:11px;letter-spacing:.18em}
+
+/* ---------- 标签 / chips ---------- */
+.chip-row{display:flex;gap:8px;flex-wrap:wrap}
+.chip{border:1px solid var(--border);padding:6px 12px;font-size:11px;letter-spacing:.14em;color:var(--ink-mid);cursor:pointer;background:none;
+  font-family:Inter,-apple-system,"PingFang SC",sans-serif}
+.chip.on{border-color:var(--crimson);color:var(--crimson);background:var(--crimson-soft)}
+.tag{display:inline-block;border:1px solid var(--hairline);padding:2px 7px;font-size:9px;letter-spacing:.14em;color:var(--ink-soft);
+  font-family:Inter,-apple-system,"PingFang SC",sans-serif}
+.tag.red{border-color:var(--crimson);color:var(--crimson)}
+.tag.moss{border-color:var(--moss);color:var(--moss)}
+
+/* ---------- 规格行（label 左 · value 右） ---------- */
+.srows{border-top:1px solid var(--hairline)}
+.srow{display:flex;justify-content:space-between;align-items:baseline;gap:16px;padding:12px 0;border-bottom:1px solid var(--hairline)}
+.sk{font-size:11px;color:var(--ink-soft);letter-spacing:.2em;flex:none;font-family:Inter,-apple-system,"PingFang SC",sans-serif}
+.sv{font-size:12px;letter-spacing:.06em;text-align:right}
+.sv.red{color:var(--crimson)}
+
+/* ---------- 列表行（我的页） ---------- */
+.list{border-top:1px solid var(--hairline);margin:0 26px}
+.li{display:flex;align-items:center;gap:14px;padding:16px 0;border-bottom:1px solid var(--hairline);cursor:pointer}
+.li-t{flex:1;font-size:13px;letter-spacing:.12em}
+.li-v{font-size:11px;color:var(--ink-soft);letter-spacing:.08em}
+.li-arrow{width:6px;height:6px;border-top:1.5px solid var(--ink-soft);border-right:1.5px solid var(--ink-soft);transform:rotate(45deg);flex:none}
+
+/* ---------- 花店列表卡 ---------- */
+.sc{display:flex;gap:16px;padding:18px 0;border-bottom:1px solid var(--hairline);cursor:pointer}
+.sc-art{width:88px;height:88px;background:var(--paper-deep);border:1px solid var(--hairline);display:grid;place-items:center;font-size:34px;flex:none}
+.sc-body{flex:1;min-width:0}
+.sc-name{font-size:15px;letter-spacing:.1em;font-weight:600}
+.sc-meta{font-size:11px;color:var(--ink-soft);letter-spacing:.08em;margin-top:6px}
+.sc-tags{display:flex;gap:6px;margin-top:9px}
+.sc-right{text-align:right;flex:none}
+.sc-dist{font-size:11px;color:var(--ink-mid);letter-spacing:.04em}
+.sc-open{font-size:10px;color:var(--moss);letter-spacing:.14em;margin-top:6px}
+
+/* ---------- 筛选条 ---------- */
+.filterbar{display:flex;gap:22px;padding:14px 26px;border-bottom:1px solid var(--hairline);align-items:center}
+.fb-i{font-size:11px;letter-spacing:.16em;color:var(--ink-soft);cursor:pointer;position:relative;padding-bottom:6px}
+.fb-i.on{color:var(--ink);font-weight:600}
+.fb-i.on:after{content:"";position:absolute;left:50%;bottom:0;transform:translateX(-50%);width:18px;height:1px;background:var(--crimson)}
+
+/* ---------- 商品详情 ---------- */
+.d-art{margin:18px 26px 0;aspect-ratio:1/1;background:var(--paper-deep);border:1px solid var(--hairline);display:grid;place-items:center;font-size:96px;position:relative}
+.d-dots{display:flex;gap:6px;justify-content:center;margin-top:12px}
+.d-dots i{width:4px;height:4px;border-radius:50%;background:var(--border)}
+.d-dots i.on{background:var(--crimson)}
+.d-head{padding:22px 26px 0}
+.d-price{font-size:26px;color:var(--crimson);letter-spacing:.02em}
+.d-price small{font-size:12px}
+.d-was{font-size:11px;color:var(--ink-soft);text-decoration:line-through;margin-left:10px}
+.d-sales{float:right;font-size:11px;color:var(--ink-soft);letter-spacing:.08em;margin-top:12px}
+.d-name{font-size:20px;font-weight:600;letter-spacing:.12em;margin-top:12px;line-height:1.6}
+.d-sub{font-size:11px;color:var(--ink-mid);letter-spacing:.14em;margin-top:8px}
+.d-quote{margin:20px 26px 0;padding:16px 18px;background:var(--paper-deep);border-left:2px solid var(--crimson);position:relative}
+.d-quote .q{font-size:12px;line-height:2.1;letter-spacing:.08em;color:var(--ink-mid)}
+.d-quote .qt{font-size:10px;letter-spacing:.3em;color:var(--crimson);margin-bottom:8px}
+.promise{margin:24px 26px 0;border-top:1px solid var(--hairline)}
+.promise-i{display:flex;gap:10px;align-items:baseline;padding:11px 0;border-bottom:1px solid var(--hairline);font-size:11px;color:var(--ink-mid);letter-spacing:.08em}
+.promise-i b{color:var(--crimson);font-weight:400;font-size:11px;flex:none}
+
+/* ---------- AI 顾问页 ---------- */
+.adv-body{flex:1;padding:0 26px;overflow:hidden}
+.adv-hero{padding:56px 0 0;text-align:left;position:relative}
+.adv-greet{font-size:24px;font-weight:600;letter-spacing:.16em;line-height:1.8}
+.adv-sub{font-size:11px;color:var(--ink-soft);letter-spacing:.18em;margin-top:14px;line-height:2}
+.adv-chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:26px}
+.adv-disc{font-size:9px;color:var(--ink-soft);letter-spacing:.12em;text-align:center;padding:10px 26px 14px;line-height:1.8}
+.msg{display:flex;gap:10px;margin-top:22px}
+.msg-glyph{color:var(--crimson);font-size:12px;flex:none;margin-top:4px}
+.msg-txt{font-size:13px;line-height:2.1;letter-spacing:.05em}
+.msg-u{display:flex;justify-content:flex-end;margin-top:22px}
+.msg-u span{background:var(--ink);color:var(--paper);font-size:12px;line-height:1.9;letter-spacing:.06em;padding:10px 14px;border-radius:4px 4px 0 4px;max-width:76%}
+.tool{display:flex;align-items:center;gap:8px;margin-top:22px;font-size:11px;color:var(--ink-soft);letter-spacing:.16em}
+.tool-dot{width:5px;height:5px;border-radius:50%;background:var(--crimson);animation:pulse 1.2s infinite}
+@keyframes pulse{0%,100%{opacity:.25}50%{opacity:1}}
+
+/* 横滑商品卡 */
+.hcards{display:flex;gap:12px;overflow-x:auto;margin-top:16px;padding-bottom:6px;scrollbar-width:none}
+.hcards::-webkit-scrollbar{display:none}
+.hc{width:138px;flex:none;border:1px solid var(--hairline);background:var(--paper)}
+.hc-art{width:100%;height:142px;background:var(--paper-deep);display:grid;place-items:center;font-size:44px;border-bottom:1px solid var(--hairline)}
+.hc-name{font-size:12px;font-weight:600;letter-spacing:.08em;padding:10px 10px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hc-shop{font-size:9px;color:var(--ink-soft);letter-spacing:.1em;padding:4px 10px 0}
+.hc-foot{display:flex;justify-content:space-between;align-items:center;padding:8px 10px 10px}
+.hc-price{font-size:13px;color:var(--crimson)}
+.hc-btn{font-size:10px;letter-spacing:.14em;border:1px solid var(--ink);padding:4px 8px;cursor:pointer;font-family:Inter,-apple-system,"PingFang SC",sans-serif}
+
+/* DIY 方案卡 */
+.diy{margin-top:16px;border:1px solid var(--ink);background:var(--paper)}
+.diy-head{padding:14px 16px 12px;border-bottom:1px solid var(--hairline);display:flex;justify-content:space-between;align-items:baseline}
+.diy-k{font-size:9px;letter-spacing:.3em;color:var(--crimson)}
+.diy-name{font-size:15px;font-weight:600;letter-spacing:.1em;margin-top:6px}
+.diy-price{font-size:14px;color:var(--crimson);text-align:right}
+.diy-price small{display:block;font-size:9px;color:var(--ink-soft);letter-spacing:.14em;margin-top:3px}
+.diy-sec{padding:12px 16px;border-bottom:1px solid var(--hairline)}
+.diy-sec-t{font-size:10px;letter-spacing:.28em;color:var(--ink-soft);margin-bottom:8px}
+.diy-sec-b{font-size:11px;line-height:2;letter-spacing:.06em;color:var(--ink-mid)}
+.diy-sec-b b{color:var(--ink);font-weight:600}
+.diy-step{display:flex;gap:10px;font-size:11px;line-height:1.9;color:var(--ink-mid);letter-spacing:.04em}
+.diy-step i{font-style:normal;color:var(--crimson);font-size:10px;flex:none;margin-top:4px;font-family:Inter,sans-serif}
+.diy-acts{display:flex;gap:10px;padding:12px 16px}
+.diy-acts .btn{flex:1}
+
+/* 生图任务卡 */
+.gen{margin-top:16px;border:1px solid var(--hairline);background:var(--paper-deep)}
+.gen-art{height:150px;display:grid;place-items:center;position:relative}
+.gen-art .emoji{font-size:40px;opacity:.5}
+.gen-pulse{position:absolute;inset:0;background:linear-gradient(110deg,transparent 30%,rgba(251,249,244,.7) 50%,transparent 70%);
+  background-size:200% 100%;animation:sheen 1.6s infinite}
+@keyframes sheen{0%{background-position:120% 0}100%{background-position:-80% 0}}
+.gen-bar{margin:0 16px;height:1px;background:var(--border);position:relative}
+.gen-bar i{position:absolute;left:0;top:0;height:1px;width:42%;background:var(--crimson)}
+.gen-txt{display:flex;justify-content:space-between;padding:10px 16px 14px;font-size:10px;color:var(--ink-soft);letter-spacing:.16em}
+
+/* 输入栏 */
+.inputbar{margin-top:auto;border-top:1px solid var(--hairline);padding:12px 26px 16px;display:flex;align-items:center;gap:12px;flex:none;background:var(--paper)}
+.input{flex:1;border-bottom:1px solid var(--hairline);padding:8px 0;font-size:12px;color:var(--ink-soft);letter-spacing:.08em}
+.send{width:34px;height:34px;border:1px solid var(--ink);border-radius:50%;display:grid;place-items:center;cursor:pointer;flex:none;background:var(--ink);color:var(--paper);font-size:13px}
+
+/* ---------- 购物车 ---------- */
+.group-head{display:flex;align-items:center;gap:10px;padding:18px 26px 0}
+.group-head .shop-dot{width:6px;height:6px}
+.group-head b{font-size:13px;letter-spacing:.1em;font-weight:600}
+.group-head span{font-size:10px;color:var(--ink-soft);letter-spacing:.12em;margin-left:auto}
+.ci{display:flex;gap:14px;padding:16px 26px;border-bottom:1px solid var(--hairline)}
+.ci-art{width:76px;height:80px;background:var(--paper-deep);border:1px solid var(--hairline);display:grid;place-items:center;font-size:30px;flex:none}
+.ci-body{flex:1;min-width:0}
+.ci-name{font-size:13px;font-weight:600;letter-spacing:.08em}
+.ci-spec{font-size:10px;color:var(--ink-soft);letter-spacing:.1em;margin-top:5px}
+.ci-foot{display:flex;justify-content:space-between;align-items:center;margin-top:14px}
+.ci-price{font-size:14px;color:var(--crimson)}
+.stepper{display:flex;align-items:center;gap:0;border:1px solid var(--border)}
+.st-btn{width:24px;height:24px;display:grid;place-items:center;font-size:12px;color:var(--ink-mid);cursor:pointer;background:none;border:none;font-family:Inter,sans-serif}
+.st-num{width:30px;text-align:center;font-size:11px;border-left:1px solid var(--border);border-right:1px solid var(--border);line-height:24px;font-family:Inter,sans-serif}
+
+/* ---------- 结算 ---------- */
+.addr{margin:18px 26px 0;border:1px solid var(--hairline);padding:16px;display:flex;gap:12px;cursor:pointer;background:var(--paper)}
+.addr-ico{width:14px;height:14px;border:1.5px solid var(--crimson);border-radius:50% 50% 50% 0;transform:rotate(-45deg);flex:none;margin-top:3px;position:relative}
+.addr-ico:after{content:"";position:absolute;left:3.5px;top:3.5px;width:4px;height:4px;border-radius:50%;background:var(--crimson)}
+.addr-body{flex:1}
+.addr-name{font-size:13px;font-weight:600;letter-spacing:.08em}
+.addr-name small{font-size:11px;color:var(--ink-soft);font-weight:400;margin-left:10px;letter-spacing:.06em}
+.addr-txt{font-size:11px;color:var(--ink-mid);letter-spacing:.06em;line-height:1.9;margin-top:6px}
+.seg{display:flex;margin:22px 26px 0;border:1px solid var(--border)}
+.seg-i{flex:1;text-align:center;padding:11px 0;font-size:11px;letter-spacing:.2em;color:var(--ink-soft);cursor:pointer}
+.seg-i + .seg-i{border-left:1px solid var(--border)}
+.seg-i.on{background:var(--ink);color:var(--paper);font-weight:600}
+.form-sec{margin:26px 26px 0}
+.form-t{font-size:11px;letter-spacing:.28em;color:var(--ink-soft);margin-bottom:12px}
+.card-box{border:1px solid var(--hairline);background:var(--paper-deep);padding:14px;position:relative}
+.card-box .ta{font-size:12px;line-height:2;letter-spacing:.06em;color:var(--ink-mid);min-height:52px}
+.ai-write{position:absolute;right:12px;bottom:10px;font-size:10px;letter-spacing:.16em;color:var(--crimson);cursor:pointer}
+.gm{display:flex;gap:12px;padding:12px 0;border-bottom:1px solid var(--hairline);align-items:center}
+.gm-art{width:48px;height:50px;background:var(--paper-deep);border:1px solid var(--hairline);display:grid;place-items:center;font-size:20px;flex:none}
+.gm-name{flex:1;font-size:12px;letter-spacing:.06em}
+.gm-name small{display:block;font-size:10px;color:var(--ink-soft);margin-top:4px;letter-spacing:.1em}
+.gm-price{font-size:12px;color:var(--crimson)}
+.fee{margin:24px 26px 0;border-top:1px solid var(--hairline)}
+.fee-r{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--hairline);font-size:11px;letter-spacing:.08em;color:var(--ink-mid)}
+.fee-r.total{color:var(--ink);font-size:12px}
+.fee-r.total .v{font-size:17px;color:var(--crimson)}
+
+/* ---------- 订单 ---------- */
+.o-tabs{display:flex;gap:20px;padding:14px 26px;border-bottom:1px solid var(--hairline);overflow-x:auto;scrollbar-width:none}
+.o-tabs::-webkit-scrollbar{display:none}
+.o-tab{font-size:11px;letter-spacing:.14em;color:var(--ink-soft);cursor:pointer;white-space:nowrap;position:relative;padding-bottom:7px}
+.o-tab.on{color:var(--ink);font-weight:600}
+.o-tab.on:after{content:"";position:absolute;left:50%;bottom:0;transform:translateX(-50%);width:16px;height:1px;background:var(--crimson)}
+.o-card{margin:20px 26px 0;border:1px solid var(--hairline)}
+.o-head{display:flex;justify-content:space-between;align-items:baseline;padding:13px 16px;border-bottom:1px solid var(--hairline)}
+.o-shop{font-size:12px;font-weight:600;letter-spacing:.1em}
+.o-status{font-size:11px;letter-spacing:.16em;color:var(--moss)}
+.o-status.red{color:var(--crimson)}
+.o-goods{padding:4px 16px}
+.o-total{padding:10px 16px;border-top:1px solid var(--hairline);font-size:11px;color:var(--ink-soft);letter-spacing:.08em;text-align:right}
+.o-total b{font-size:14px;color:var(--crimson);font-weight:600;margin-left:6px}
+.o-btns{display:flex;gap:10px;justify-content:flex-end;padding:12px 16px;border-top:1px solid var(--hairline)}
+
+/* 订单详情 · 状态区与进度 */
+.od-hero{padding:34px 26px 26px;border-bottom:1px solid var(--hairline);position:relative}
+.od-status{font-size:24px;font-weight:600;letter-spacing:.18em}
+.od-sub{font-size:11px;color:var(--ink-soft);letter-spacing:.16em;margin-top:10px}
+.steps{display:flex;margin:26px 26px 0;position:relative}
+.step{flex:1;text-align:center;position:relative}
+.step-dot{width:8px;height:8px;border-radius:50%;border:1px solid var(--border);background:var(--paper);margin:0 auto;position:relative;z-index:1}
+.step-line{position:absolute;top:3.5px;left:calc(-50% + 8px);right:calc(50% + 8px);height:1px;background:var(--border)}
+.step:first-child .step-line{display:none}
+.step-t{font-size:9px;letter-spacing:.14em;color:var(--ink-soft);margin-top:9px}
+.step.done .step-dot{background:var(--crimson);border-color:var(--crimson)}
+.step.done .step-line{background:var(--crimson)}
+.step.done .step-t{color:var(--ink-mid)}
+.step.now .step-dot{border-color:var(--crimson);box-shadow:0 0 0 3px var(--crimson-soft)}
+.step.now .step-t{color:var(--crimson);font-weight:600}
+
+/* ---------- 我的 ---------- */
+.pf-head{padding:30px 26px 26px;display:flex;gap:16px;align-items:center;border-bottom:1px solid var(--hairline)}
+.pf-avatar{width:56px;height:56px;border:1px solid var(--ink);border-radius:50%;display:grid;place-items:center;font-size:20px;letter-spacing:.1em;flex:none;background:var(--paper-deep)}
+.pf-name{font-size:17px;font-weight:600;letter-spacing:.14em}
+.pf-phone{font-size:11px;color:var(--ink-soft);letter-spacing:.1em;margin-top:7px}
+.shortcuts{display:flex;margin:0 26px;border-bottom:1px solid var(--hairline)}
+.scut{flex:1;text-align:center;padding:18px 0 16px;cursor:pointer;position:relative}
+.scut + .scut{border-left:1px solid var(--hairline)}
+.scut-t{font-size:11px;letter-spacing:.12em;color:var(--ink-mid)}
+.scut-n{position:absolute;top:10px;left:calc(50% + 14px);min-width:16px;height:16px;background:var(--crimson);color:#fff;border-radius:7px;font-size:9px;display:grid;place-items:center;padding:0 3px;font-family:Inter,sans-serif}
+
+/* ---------- 登录 ---------- */
+.lg-body{flex:1;display:flex;flex-direction:column;padding:0 34px}
+.lg-brand{font-size:30px;font-weight:600;letter-spacing:.4em;margin-top:88px;text-indent:.4em}
+.lg-sub{font-size:10px;color:var(--ink-soft);letter-spacing:.36em;margin-top:16px}
+.lg-rule{height:1px;background:var(--ink);opacity:.85;margin-top:22px}
+.field{margin-top:30px}
+.field-label{font-size:10px;letter-spacing:.3em;color:var(--ink-soft)}
+.field-input{border-bottom:1px solid var(--hairline);padding:12px 0;font-size:14px;letter-spacing:.1em;color:var(--ink);display:flex;justify-content:space-between;align-items:center}
+.field-input .ph{color:var(--ink-soft);font-size:12px;letter-spacing:.08em}
+.code-btn{font-size:11px;letter-spacing:.18em;color:var(--crimson);cursor:pointer;white-space:nowrap}
+.lg-btns{margin-top:44px;display:flex;flex-direction:column;gap:14px}
+.agree{display:flex;gap:8px;align-items:flex-start;margin-top:20px;font-size:10px;color:var(--ink-soft);letter-spacing:.06em;line-height:1.9}
+.agree i{width:11px;height:11px;border:1px solid var(--border);border-radius:50%;flex:none;margin-top:2px;position:relative}
+.agree i.on{border-color:var(--crimson)}
+.agree i.on:after{content:"";position:absolute;inset:2.5px;background:var(--crimson);border-radius:50%}
+.agree b{color:var(--ink-mid);font-weight:400;border-bottom:1px solid var(--hairline)}
+
+/* ---------- 规范页（画布级） ---------- */
+.spec-wrap{margin-top:40px;background:var(--paper);border:1px solid var(--border);border-radius:8px;padding:56px 52px}
+.spec-grid{display:grid;grid-template-columns:1fr 1fr;gap:64px 72px}
+@media(max-width:1200px){.spec-grid{grid-template-columns:1fr}}
+.spec-sec{}
+.spec-h{font-size:11px;letter-spacing:.32em;color:var(--crimson);margin-bottom:8px}
+.spec-t{font-size:19px;font-weight:600;letter-spacing:.1em;margin-bottom:6px}
+.spec-d{font-size:11px;color:var(--ink-mid);letter-spacing:.06em;line-height:2;margin-bottom:24px}
+.swatches{display:flex;gap:10px;flex-wrap:wrap}
+.sw{width:104px}
+.sw i{display:block;height:56px;border:1px solid rgba(80,72,58,.2)}
+.sw-n{font-size:11px;letter-spacing:.12em;margin-top:9px;font-weight:600}
+.sw-hex{font-size:10px;color:var(--ink-soft);letter-spacing:.06em;margin-top:3px}
+.sw-u{font-size:10px;color:var(--ink-mid);letter-spacing:.04em;margin-top:3px;line-height:1.7}
+.scale-row{display:flex;align-items:baseline;gap:18px;padding:13px 0;border-bottom:1px solid var(--hairline)}
+.scale-k{width:130px;flex:none;font-size:10px;color:var(--ink-soft);letter-spacing:.1em;line-height:1.8}
+.scale-v{flex:1;min-width:0}
+.comp{display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-bottom:22px}
+.comp-col{display:flex;flex-direction:column;gap:10px;align-items:flex-start}
+.rules{display:grid;grid-template-columns:1fr 1fr;gap:0;border-top:1px solid var(--hairline)}
+@media(max-width:900px){.rules{grid-template-columns:1fr}}
+.rule{padding:20px 24px 20px 0;border-bottom:1px solid var(--hairline)}
+.rule:nth-child(odd){padding-right:32px}
+.rule b{font-size:13px;letter-spacing:.12em;display:block;margin-bottom:8px}
+.rule p{font-size:11px;color:var(--ink-mid);line-height:2;letter-spacing:.05em}
+.rule i{font-style:normal;color:var(--crimson);font-size:10px;letter-spacing:.24em;display:block;margin-bottom:8px}
+.token-tbl{width:100%;border-collapse:collapse;font-size:11px}
+.token-tbl th{text-align:left;font-weight:600;letter-spacing:.14em;padding:9px 10px;border-bottom:1.5px solid var(--ink);font-size:10px;color:var(--ink-soft)}
+.token-tbl td{padding:9px 10px;border-bottom:1px solid var(--hairline);letter-spacing:.04em;color:var(--ink-mid)}
+.token-tbl td:first-child{font-family:Inter,Consolas,monospace;font-size:10px;color:var(--ink)}
+.token-tbl .old{color:var(--ink-soft);text-decoration:line-through}
+.token-tbl .new{color:var(--crimson)}
+.refs{margin-top:26px;padding-top:20px;border-top:1px solid var(--hairline);font-size:11px;color:var(--ink-mid);line-height:2.2;letter-spacing:.05em}
+.refs b{color:var(--ink);font-weight:600}
+
+.toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:#23221d;color:#f6f1e7;padding:11px 20px;font-size:12px;letter-spacing:.12em;z-index:99;transition:opacity .4s;opacity:0;pointer-events:none;font-family:Inter,-apple-system,"PingFang SC",sans-serif}
+
+@media(max-width:900px){
+  .stage{padding:24px 10px 56px}
+  .row{gap:64px 0;justify-content:center}
+  .spec-wrap{padding:32px 20px}
+}
+</style>
+</head>
+<body>
+<main class="stage"><div class="board">
+
+  <header class="board-head">
+    <div>
+      <div class="kicker sans">TIAOWULAN · QUIET EDITION</div>
+      <h1 class="board-title">文艺，但克制</h1>
+      <p class="board-desc sans">全站高保真效果图 · v0.4.1 · 17 屏 + 设计规范 · 供评审定稿后再实施<br>
+      <span style="color:#93372b">v0.4.1 修订：整体色调加深一档（纸底/墨色/发丝线/朱砂全部下压），最小字号 +1px；660 处文字对比度实测最低 4.94:1，达 WCAG AA</span></p>
+    </div>
+    <div class="edition sans">ISSUE 04.1<br>375 × NATIVE<br>2026 · 秋</div>
+  </header>
+  <div class="board-rule"></div>
+  <nav class="toc sans">
+    <a href="#spec">卷首 · 规范</a>
+    <a href="#ch1">壹 · 逛</a>
+    <a href="#ch2">贰 · 选</a>
+    <a href="#ch3">叁 · 问（AI）</a>
+    <a href="#ch4">肆 · 买</a>
+    <a href="#ch5">伍 · 我的</a>
+  </nav>
+
+<!-- ============================ 卷首 · 设计规范 ============================ -->
+<section class="chapter" id="spec">
+  <div class="ch-head">
+    <span class="ch-no sans">CHAPTER 00</span>
+    <h2 class="ch-title">设计规范 · 四样东西撑起全站气质</h2>
+    <span class="ch-line"></span>
+  </div>
+  <p class="ch-desc sans">宋体 · 留白 · 发丝线 · 一点朱砂。印章、水印、色块装饰全部摘掉；朱砂红每屏出现不超过四处，像批注，不像促销。以下色值与阶梯已对齐现有 tokens.scss 变量名，定稿后可直接替换落地。</p>
+
+  <div class="spec-wrap">
+    <div class="spec-grid">
+
+      <div class="spec-sec">
+        <div class="spec-h sans">PALETTE</div>
+        <div class="spec-t">色板 · 纸墨为主，朱砂点睛</div>
+        <p class="spec-d sans">对标实测：观夏全站在 #F6F6F6 纸底上只留黑白文字、零圆角零阴影；ROSEONLY 价格与商品名同色同字号。高级感来自「少一种颜色」，不是多一种。</p>
+        <div class="swatches">
+          <div class="sw"><i style="background:#f6f1e7"></i><div class="sw-n">宣纸</div><div class="sw-hex sans">F6F1E7 · --paper</div><div class="sw-u sans">页面底 / 卡片底</div></div>
+          <div class="sw"><i style="background:#ebe3d3"></i><div class="sw-n">深纸</div><div class="sw-hex sans">EBE3D3 · --paper-deep</div><div class="sw-u sans">图区底 / 引用底</div></div>
+          <div class="sw"><i style="background:#23221d"></i><div class="sw-n" style="color:#23221d">墨</div><div class="sw-hex sans">23221D · --ink</div><div class="sw-u sans">标题 / 正文 / 主按钮</div></div>
+          <div class="sw"><i style="background:#544e44"></i><div class="sw-n">淡墨</div><div class="sw-hex sans">544E44 · --ink-mid</div><div class="sw-u sans">次级说明</div></div>
+          <div class="sw"><i style="background:#675f51"></i><div class="sw-n">远墨</div><div class="sw-hex sans">675F51 · --ink-soft</div><div class="sw-u sans">弱文字 / 元信息</div></div>
+          <div class="sw"><i style="background:#d5ccb9"></i><div class="sw-n">发丝线</div><div class="sw-hex sans">D5CCB9 · --hairline</div><div class="sw-u sans">全站唯一分隔手段</div></div>
+          <div class="sw"><i style="background:#93372b"></i><div class="sw-n">朱砂</div><div class="sw-hex sans">93372B · --crimson</div><div class="sw-u sans">价格 / 选中 / 支付 / 日期<br><b>每屏 ≤ 4 处</b></div></div>
+          <div class="sw"><i style="background:#55644a"></i><div class="sw-n">苔</div><div class="sw-hex sans">55644A · --moss</div><div class="sw-u sans">营业中 / 已完成态，仅此</div></div>
+        </div>
+        <div class="refs sans">
+          <b>落地映射（tokens.scss）：</b>
+          <span class="old">#E8615D 玫瑰粉</span> → <span class="new">#93372B 朱砂</span>；
+          <span class="old">#4ECDC4 薄荷绿</span> → 删除（状态绿收敛为 <span class="new">#55644A 苔</span>）；
+          <span class="old">#F8F5F0 底</span> → <span class="new">#F6F1E7 宣纸</span>；
+          <span class="old">#2D3436 文字</span> → <span class="new">#23221D 墨</span>；
+          阴影四档全部删除，改发丝线 + 1px 边框。
+        </div>
+      </div>
+
+      <div class="spec-sec">
+        <div class="spec-h sans">TYPE SCALE</div>
+        <div class="spec-t">文字阶梯 · 衬线立骨，无衬线记事</div>
+        <p class="spec-d sans">中文标题、商品名、价格一律宋体（Songti SC / Noto Serif SC）；数字、元信息、按钮、标签一律无衬线（Inter / PingFang SC）。字距是这套风格的一半：小字大字距，大字小字距。</p>
+        <div class="scale-row"><div class="scale-k sans">DISPLAY 30/600<br>字距 .4em</div><div class="scale-v" style="font-size:30px;font-weight:600;letter-spacing:.4em">跳舞兰</div></div>
+        <div class="scale-row"><div class="scale-k sans">HERO 26/600<br>字距 .1em</div><div class="scale-v" style="font-size:26px;font-weight:600;letter-spacing:.1em;line-height:1.7">把心意交给花</div></div>
+        <div class="scale-row"><div class="scale-k sans">TITLE 20/600<br>字距 .12em</div><div class="scale-v" style="font-size:20px;font-weight:600;letter-spacing:.12em">郁见你 · 郁金香花束</div></div>
+        <div class="scale-row"><div class="scale-k sans">SECTION 15/600<br>字距 .28em</div><div class="scale-v" style="font-size:15px;font-weight:600;letter-spacing:.28em">今日花选</div></div>
+        <div class="scale-row"><div class="scale-k sans">CARD 13/600<br>字距 .1em</div><div class="scale-v" style="font-size:13px;font-weight:600;letter-spacing:.1em">奶油郁金香</div></div>
+        <div class="scale-row"><div class="scale-k sans">BODY 12/400<br>字距 .05em</div><div class="scale-v" style="font-size:12px;letter-spacing:.05em;line-height:2;color:#544e44">红玫瑰十一支，配满天星，适合生日与告白。</div></div>
+        <div class="scale-row"><div class="scale-k sans">PRICE 14~26<br>朱砂 · 衬线</div><div class="scale-v" style="font-size:18px;color:#93372b">¥168 <small class="sans" style="font-size:10px;color:#675f51;text-decoration:line-through">¥198</small></div></div>
+        <div class="scale-row"><div class="scale-k sans">META 10/400<br>字距 .1em · 无衬线</div><div class="scale-v sans" style="font-size:11px;color:#675f51;letter-spacing:.1em">★ 4.9 · 月售 300+ · 0.8km</div></div>
+        <div class="scale-row"><div class="scale-k sans">KICKER 9/400<br>字距 .3em · 无衬线</div><div class="scale-v sans" style="font-size:10px;color:#93372b;letter-spacing:.3em">SEPTEMBER · 今日花材</div></div>
+      </div>
+
+      <div class="spec-sec">
+        <div class="spec-h sans">COMPONENTS</div>
+        <div class="spec-t">核心组件</div>
+        <p class="spec-d sans">按钮三态：墨底为主动作；发丝边框为次动作；朱砂底<b>只给支付类承诺动作</b>（下单 / 去支付），像盖章。圆角全站 ≤ 4px，阴影全站为 0。</p>
+        <div class="comp">
+          <span class="btn">立即购买</span>
+          <span class="btn ghost">加入购物车</span>
+          <span class="btn red">去支付</span>
+          <span class="btn hair sm">复制单号</span>
+        </div>
+        <div class="comp">
+          <span class="tag sans">生日</span>
+          <span class="tag red sans">今日可送</span>
+          <span class="tag moss sans">营业中</span>
+          <span class="chip sans">温柔明亮</span>
+          <span class="chip on sans">淡色系</span>
+        </div>
+        <div class="comp" style="align-items:flex-start;gap:28px">
+          <div class="comp-col">
+            <div class="stepper"><button class="st-btn">−</button><span class="st-num">1</span><button class="st-btn">＋</button></div>
+            <span class="sans" style="font-size:10px;color:#675f51;letter-spacing:.14em">步进器 · 发丝边框</span>
+          </div>
+          <div class="comp-col" style="width:190px">
+            <div style="display:flex;justify-content:space-around;width:100%;border-top:1px solid #d5ccb9;padding-top:12px">
+              <span class="tab active" style="position:relative">首页</span>
+              <span class="tab">花店</span>
+              <span class="tab">顾问</span>
+              <span class="tab">花篮<span class="badge sans">2</span></span>
+              <span class="tab">我的</span>
+            </div>
+            <span class="sans" style="font-size:10px;color:#675f51;letter-spacing:.14em">TabBar · 纯文字 + 朱砂点</span>
+          </div>
+        </div>
+        <div class="comp" style="margin-top:6px">
+          <div style="width:220px">
+            <div class="field-label sans" style="font-size:10px;letter-spacing:.3em;color:#675f51">收花人</div>
+            <div style="border-bottom:1px solid #d5ccb9;padding:10px 0;font-size:13px;letter-spacing:.08em">林小满</div>
+            <span class="sans" style="font-size:10px;color:#675f51;letter-spacing:.14em;display:block;margin-top:8px">输入 · 只有下划线，无盒子</span>
+          </div>
+          <div style="width:170px;text-align:center;padding:26px 0;border:1px solid #d5ccb9;background:#ebe3d3">
+            <div style="font-size:26px;opacity:.4">❀</div>
+            <div style="font-size:11px;letter-spacing:.2em;margin-top:10px;color:#544e44">花篮还是空的</div>
+            <div class="sans" style="font-size:10px;letter-spacing:.12em;margin-top:6px;color:#675f51">去挑一束 →</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="spec-sec">
+        <div class="spec-h sans">DISCIPLINE</div>
+        <div class="spec-t">五条纪律</div>
+        <p class="spec-d sans">这套风格的成败不在元素，在克制。评审时按这五条逐屏验收。</p>
+        <div class="rules">
+          <div class="rule"><i class="sans">RULE 01</i><b>朱砂 ≤ 4 处 / 屏</b><p class="sans">只出现在：价格、选中态、支付动作、日期/编号 kicker。红色一多就变促销页。</p></div>
+          <div class="rule"><i class="sans">RULE 02</i><b>发丝线是唯一分隔</b><p class="sans">1px #D5CCB9。禁用色块分区、禁用卡片投影、禁用渐变背景。</p></div>
+          <div class="rule"><i class="sans">RULE 03</i><b>圆角 ≤ 4px，阴影 = 0</b><p class="sans">器物感来自直角与细边框。实测观夏全站 border-radius 为空、box-shadow 为空。</p></div>
+          <div class="rule"><i class="sans">RULE 04</i><b>价格不嘶吼</b><p class="sans">ROSEONLY 实测：价格与商品名同色同字号。我们只给朱砂色，不加粗、不放大、不带感叹号。</p></div>
+          <div class="rule"><i class="sans">RULE 05</i><b>克制 ≠ 看不清</b><p class="sans">正文对比度 ≥ 4.5:1、大字 ≥ 3:1（WCAG AA）；最小字号 9px 仅用于角标，正文不小于 11px。文艺靠留白与字体，不靠把字调淡——本稿 660 处文字实测最低 4.94:1。落地时若有人想再调浅，先过这条。</p></div>
+        </div>
+        <div class="refs sans">
+          <b>与小程序共用：</b>以上全部 token 同名写入 app.wxss（rpx 数值与 H5 的 rpx() 参数 1:1，
+          交接单 §7.4 已确认同尺度）。衬线字体小程序端 fallback 到系统宋体，无需引入字体文件。
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+<!-- ============================ 壹 · 逛 ============================ -->
+<section class="chapter" id="ch1">
+  <div class="ch-head">
+    <span class="ch-no sans">CHAPTER 01</span>
+    <h2 class="ch-title">壹 · 逛 —— 进来先安静，再看见花</h2>
+    <span class="ch-line"></span>
+  </div>
+  <p class="ch-desc sans">首页不是货架，是刊物的封面：日期、刊名、一句话主视觉、一枝花。花店改「名单式」纯文字条目（对标观夏门店页），商品卡去投影去圆角，图版用深纸色衬底，像标本册的相纸框。对应路由：/（首页）、/shops（全部花店）、/shop/:id（店铺详情）。</p>
+
+  <div class="row">
+
+    <!-- ========== 01 首页 ========== -->
+    <div class="frame-wrap">
+      <div class="phone"><div class="screen">
+        <div class="st sans"><span><b>9:41</b></span><span>●●● ▮</span></div>
+        <div class="masthead">
+          <div class="masthead-top">
+            <div class="brand">跳舞兰</div>
+            <div class="city sans"><b>杭州</b> ⌄</div>
+          </div>
+          <div class="masthead-sub sans">同城花店 · 一小时送达</div>
+          <div class="masthead-rule"></div>
+        </div>
+        <div class="search sans"><i></i><span>花束、花店，或一个场景</span><em>搜索</em></div>
+        <div class="hero">
+          <div class="hero-date sans">九月廿四 · 星期四</div>
+          <h2>把心意，交给一束刚刚好的花</h2>
+          <p class="sans">今日花材 · 带着露水送到</p>
+          <button class="hero-cta sans">今日花选 →</button>
+          <svg class="deco-svg" viewBox="0 0 74 96" fill="none" stroke="#93372b" stroke-width="1.2" stroke-linecap="round">
+            <path d="M37 92 C37 68 34 54 37 38"/>
+            <path d="M37 64 C26 59 19 50 19 40 C28 43 34 51 37 60"/>
+            <path d="M37 54 C48 49 55 40 55 30 C46 33 40 41 37 50"/>
+            <circle cx="37" cy="26" r="5"/>
+            <path d="M37 21 C34 14 35 8 37 5 C39 8 40 14 37 21"/>
+            <path d="M32 25 C26 22 21 23 18 25 C21 27 27 28 33 27"/>
+            <path d="M42 25 C48 22 53 23 56 25 C53 27 47 28 41 27"/>
+          </svg>
+        </div>
+        <div class="ai-line">
+          <span class="ai-glyph">✦</span>
+          <strong>不知送什么，问花艺顾问</strong>
+          <small class="sans">三句话，换一份花方 ›</small>
+        </div>
+        <div class="sec">
+          <div class="sec-head">
+            <span class="sec-title">场景</span><span class="sec-line"></span><span class="sec-more sans">全部 ›</span>
+          </div>
+          <div class="scenes sans">
+            <div class="scene active">生日</div><div class="scene">心动</div><div class="scene">庆贺</div><div class="scene">致意</div>
+          </div>
+        </div>
+        <div class="sec">
+          <div class="sec-head">
+            <span class="sec-title">附近的花店</span><span class="sec-line"></span><span class="sec-more sans">更多 ›</span>
+          </div>
+          <div class="shops">
+            <div class="shop">
+              <span class="shop-dot"></span>
+              <div class="shop-body">
+                <div class="shop-name">花间里 · 湖滨店</div>
+                <div class="shop-meta sans"><span class="open-dot"></span>★ 4.9 · 月售 300+ · 配送快</div>
+              </div>
+              <span class="shop-dist sans">0.8km</span>
+            </div>
+            <div class="shop">
+              <span class="shop-dot"></span>
+              <div class="shop-body">
+                <div class="shop-name">野生花社</div>
+                <div class="shop-meta sans"><span class="open-dot"></span>★ 4.8 · 新店 · 自然系花束</div>
+              </div>
+              <span class="shop-dist sans">1.2km</span>
+            </div>
+          </div>
+        </div>
+        <div class="sec" style="padding-bottom:36px">
+          <div class="sec-head">
+            <span class="sec-title">今日花选</span><span class="sec-line"></span><span class="sec-more sans">更多 ›</span>
+          </div>
+          <div class="gallery">
+            <div class="piece">
+              <div class="piece-art"><span class="art-tag sans">今日可送</span>💐<span class="piece-add">＋</span></div>
+              <div class="piece-name">奶油郁金香</div>
+              <div class="piece-sub sans">温柔告白 · 花间里</div>
+              <div class="piece-foot"><span class="piece-price">¥168<small class="sans">¥198</small></span><span class="piece-like sans">♡ 128</span></div>
+            </div>
+            <div class="piece">
+              <div class="piece-art">🌹<span class="piece-add">＋</span></div>
+              <div class="piece-name">郁见你</div>
+              <div class="piece-sub sans">生日 / 纪念日 · 向阳花艺</div>
+              <div class="piece-foot"><span class="piece-price">¥158</span><span class="piece-like sans">♡ 96</span></div>
+            </div>
+          </div>
+        </div>
+        <nav class="tabbar sans">
+          <div class="tab active">首页</div><div class="tab">花店</div><div class="tab">顾问</div><div class="tab" style="position:relative">花篮<span class="badge">2</span></div><div class="tab">我的</div>
+        </nav>
+      </div></div>
+      <div class="cap">
+        <div class="cap-no sans">SCREEN 01 · HOME</div>
+        <div class="cap-name">首页 · 刊物封面式</div>
+        <p class="cap-note sans">日期 kicker + 宋体主视觉 + 线描花，替代原 Banner 轮播。AI 入口升为「一行素文字」夹在两条发丝线之间——它是全站差异化能力，但不嘶吼。场景四宫格纯文字化；花店名单式；商品卡深纸衬底 + 直角细框 + 圆形加购钮。</p>
+      </div>
+    </div>
+
+    <!-- ========== 02 全部花店 ========== -->
+    <div class="frame-wrap">
+      <div class="phone"><div class="screen">
+        <div class="st sans"><span><b>9:41</b></span><span>●●● ▮</span></div>
+        <div class="nav">
+          <span class="nav-back"></span>
+          <span class="nav-t">全部花店</span>
+          <span class="nav-r sans">杭州 ⌄</span>
+        </div>
+        <div class="nav-rule"></div>
+        <div class="search sans" style="margin-top:18px"><i></i><span>搜索花店名</span></div>
+        <div class="filterbar sans">
+          <span class="fb-i on">离我最近</span>
+          <span class="fb-i">评分最高</span>
+          <span class="fb-i">销量优先</span>
+          <span class="fb-i" style="margin-left:auto">营业中 ▾</span>
+        </div>
+        <div style="padding:0 26px;flex:1">
+          <div class="sc">
+            <div class="sc-art">🌷</div>
+            <div class="sc-body">
+              <div class="sc-name">花间里 · 湖滨店</div>
+              <div class="sc-meta sans"><span class="open-dot"></span>营业中 07:00–22:00 · ★ 4.9 · 月售 300+</div>
+              <div class="sc-tags"><span class="tag sans">配送快</span><span class="tag sans">可自提</span><span class="tag red sans">满 199 免运费</span></div>
+            </div>
+            <div class="sc-right"><div class="sc-dist sans">0.8km</div><div class="sc-open sans">30 分钟达</div></div>
+          </div>
+          <div class="sc">
+            <div class="sc-art">🌿</div>
+            <div class="sc-body">
+              <div class="sc-name">野生花社</div>
+              <div class="sc-meta sans"><span class="open-dot"></span>营业中 09:00–21:00 · ★ 4.8 · 月售 126</div>
+              <div class="sc-tags"><span class="tag sans">自然系</span><span class="tag sans">可做干花</span></div>
+            </div>
+            <div class="sc-right"><div class="sc-dist sans">1.2km</div><div class="sc-open sans">45 分钟达</div></div>
+          </div>
+          <div class="sc">
+            <div class="sc-art">🌹</div>
+            <div class="sc-body">
+              <div class="sc-name">向阳花艺</div>
+              <div class="sc-meta sans">休息中 明早 08:00 · ★ 4.7 · 月售 89</div>
+              <div class="sc-tags"><span class="tag sans">玫瑰专精</span><span class="tag sans">贺卡定制</span></div>
+            </div>
+            <div class="sc-right"><div class="sc-dist sans">2.1km</div><div class="sc-open sans" style="color:#675f51">明早可送</div></div>
+          </div>
+          <div class="sc" style="border-bottom:none">
+            <div class="sc-art">💐</div>
+            <div class="sc-body">
+              <div class="sc-name">一束花房</div>
+              <div class="sc-meta sans"><span class="open-dot"></span>营业中 08:00–23:00 · ★ 4.6 · 月售 64</div>
+              <div class="sc-tags"><span class="tag sans">深夜可送</span></div>
+            </div>
+            <div class="sc-right"><div class="sc-dist sans">3.4km</div><div class="sc-open sans">60 分钟达</div></div>
+          </div>
+        </div>
+      </div></div>
+      <div class="cap">
+        <div class="cap-no sans">SCREEN 02 · SHOPS</div>
+        <div class="cap-name">全部花店 · 名单与卡片之间</div>
+        <p class="cap-note sans">列表卡用「深纸图版 + 名单式信息」，不用白卡投影。苔色圆点 = 营业中（全站唯一绿色），休息中降级为远墨文字。筛选条纯文字 + 朱砂下划线。「30 分钟达」把配送时效做成花店名旁边最安静的一行小字。</p>
+      </div>
+    </div>
+
+    <!-- ========== 03 店铺详情 ========== -->
+    <div class="frame-wrap">
+      <div class="phone"><div class="screen">
+        <div class="st sans"><span><b>9:41</b></span><span>●●● ▮</span></div>
+        <div style="position:relative;flex:none">
+          <div class="nav" style="position:absolute;left:0;right:0;top:0;z-index:2;background:none">
+            <span class="nav-back"></span>
+            <span class="nav-t"></span>
+            <span class="nav-r sans">分享</span>
+          </div>
+          <div style="height:230px;background:var(--paper-deep);border-bottom:1px solid var(--border);display:grid;place-items:center;position:relative">
+            <span style="font-size:74px">🌷</span>
+            <svg viewBox="0 0 220 60" style="position:absolute;bottom:10px;left:0;right:0;margin:auto;width:220px;height:56px" fill="none" stroke="#b3a68b" stroke-width="1"><path d="M8 46 C60 30 160 30 212 46"/><path d="M40 40 C56 22 76 16 92 20"/><path d="M128 40 C144 22 164 16 180 20"/><circle cx="92" cy="18" r="4"/><circle cx="180" cy="18" r="4"/></svg>
+          </div>
+        </div>
+        <div style="padding:22px 26px 0">
+          <div style="display:flex;align-items:baseline;gap:10px">
+            <span style="font-size:20px;font-weight:600;letter-spacing:.14em">花间里 · 湖滨店</span>
+            <span class="tag moss sans" style="margin-left:auto">营业中</span>
+          </div>
+          <div class="sans" style="font-size:11px;color:#675f51;letter-spacing:.1em;margin-top:9px">★ 4.9 · 月售 300+ · 距你 0.8km · 07:00–22:00</div>
+          <div class="srows" style="margin-top:18px;border-top:1px solid #d5ccb9">
+            <div class="srow"><span class="sk">配送</span><span class="sv">30 分钟达 · 满 ¥199 免运费 · 起送 ¥59</span></div>
+            <div class="srow"><span class="sk">地址</span><span class="sv">湖滨路 26 号 1F <span style="color:#93372b;font-size:11px">复制</span></span></div>
+            <div class="srow"><span class="sk">电话</span><span class="sv">0571-8826 **** <span style="color:#93372b;font-size:11px">拨打</span></span></div>
+          </div>
+        </div>
+        <div class="sec" style="padding-top:24px">
+          <div class="chip-row" style="margin-bottom:18px">
+            <span class="chip on sans">全部 36</span><span class="chip sans">热门</span><span class="chip sans">新品</span><span class="chip sans">生日</span><span class="chip sans">庆贺</span>
+          </div>
+          <div class="gallery">
+            <div class="piece">
+              <div class="piece-art">💐<span class="piece-add">＋</span></div>
+              <div class="piece-name">奶油郁金香</div>
+              <div class="piece-sub sans">温柔告白</div>
+              <div class="piece-foot"><span class="piece-price">¥168</span><span class="piece-like sans">月售 42</span></div>
+            </div>
+            <div class="piece">
+              <div class="piece-art">🌸<span class="piece-add">＋</span></div>
+              <div class="piece-name">粉雾清晨</div>
+              <div class="piece-sub sans">开业 / 庆贺</div>
+              <div class="piece-foot"><span class="piece-price">¥239</span><span class="piece-like sans">月售 31</span></div>
+            </div>
+          </div>
+        </div>
+        <div style="height:24px"></div>
+        <div class="bottombar">
+          <div class="bb-fav sans"><i>☎</i>客服</div>
+          <div class="bb-fav sans" style="position:relative"><i>⌂</i>进店<span class="badge sans" style="top:-6px;right:-6px">2</span></div>
+          <div class="bb-sum"><div class="k sans">花篮 · 2 件</div><div class="v sans">¥407<small> 起</small></div></div>
+          <span class="btn red">去结算</span>
+        </div>
+      </div></div>
+      <div class="cap">
+        <div class="cap-no sans">SCREEN 03 · SHOP DETAIL</div>
+        <div class="cap-name">店铺详情 · 店招与货架</div>
+        <p class="cap-note sans">hero 用深纸底 + 线描花枝替代大图（真实店招图接入后自动替换）。联系信息做成三行「规格行」，复制/拨号用朱砂小字而非按钮。底部栏：客服 + 花篮角标 + 结算，朱砂「去支付」色只给最后一步。</p>
+      </div>
+    </div>
+
+  </div>
+</section>
+<!-- ============================ 贰 · 选 ============================ -->
+<section class="chapter" id="ch2">
+  <div class="ch-head">
+    <span class="ch-no sans">CHAPTER 02</span>
+    <h2 class="ch-title">贰 · 选 —— 像翻一本花谱</h2>
+    <span class="ch-line"></span>
+  </div>
+  <p class="ch-desc sans">分类页是花谱的目录，详情页是其中一页：大图版、花语引用块（朱砂竖线）、花材与养护做成规格行。价格用朱砂但不加粗不放大——对标 ROSEONLY 实测「价格与商品名同权重」。对应路由：/category、/search、/detail/:id。</p>
+
+  <div class="row">
+
+    <!-- ========== 04 分类选花 ========== -->
+    <div class="frame-wrap">
+      <div class="phone"><div class="screen">
+        <div class="st sans"><span><b>9:41</b></span><span>●●● ▮</span></div>
+        <div class="nav">
+          <span class="nav-back"></span>
+          <span class="nav-t">选花</span>
+          <span class="nav-r sans">花篮 · 2</span>
+        </div>
+        <div class="nav-rule"></div>
+        <div class="search sans" style="margin-top:16px"><i></i><span>奶油郁金香</span><em>搜索</em></div>
+        <div class="filterbar sans" style="border-bottom:1px solid var(--hairline)">
+          <span class="fb-i on">生日</span><span class="fb-i">表白</span><span class="fb-i">庆贺</span><span class="fb-i">探望</span><span class="fb-i">致意</span>
+          <span class="fb-i" style="margin-left:auto">综合 ▾</span>
+        </div>
+        <div style="padding:20px 26px;flex:1">
+          <div class="gallery">
+            <div class="piece">
+              <div class="piece-art"><span class="art-tag sans">今日可送</span>💐<span class="piece-add">＋</span></div>
+              <div class="piece-name">奶油郁金香</div>
+              <div class="piece-sub sans">温柔告白 · 花间里</div>
+              <div class="piece-foot"><span class="piece-price">¥168<small class="sans">¥198</small></span><span class="piece-like sans">★4.9</span></div>
+            </div>
+            <div class="piece">
+              <div class="piece-art">🌹<span class="piece-add">＋</span></div>
+              <div class="piece-name">郁见你</div>
+              <div class="piece-sub sans">生日 · 向阳花艺</div>
+              <div class="piece-foot"><span class="piece-price">¥158</span><span class="piece-like sans">★4.8</span></div>
+            </div>
+            <div class="piece">
+              <div class="piece-art">🌸<span class="piece-add">＋</span></div>
+              <div class="piece-name">粉雾清晨</div>
+              <div class="piece-sub sans">开业庆贺 · 野生花社</div>
+              <div class="piece-foot"><span class="piece-price">¥239</span><span class="piece-like sans">★4.7</span></div>
+            </div>
+            <div class="piece">
+              <div class="piece-art">🌼<span class="piece-add">＋</span></div>
+              <div class="piece-name">暖阳如初</div>
+              <div class="piece-sub sans">探望致意 · 一束花房</div>
+              <div class="piece-foot"><span class="piece-price">¥129</span><span class="piece-like sans">★4.9</span></div>
+            </div>
+          </div>
+          <div style="text-align:center;margin-top:26px;font-size:10px;color:#675f51;letter-spacing:.2em" class="sans">— 已到底 · 共 36 束 —</div>
+        </div>
+      </div></div>
+      <div class="cap">
+        <div class="cap-no sans">SCREEN 04 · CATEGORY</div>
+        <div class="cap-name">分类选花 · 花谱目录</div>
+        <p class="cap-note sans">顶部两行筛选（场景 Tab + 排序），都用「文字 + 朱砂下划线」不用胶囊。两列网格沿用首页素卡，图版角标「今日可送」是朱砂小字。底部「已到底」用远墨小字，不放 loading 转圈。</p>
+      </div>
+    </div>
+
+    <!-- ========== 05 商品详情 ========== -->
+    <div class="frame-wrap">
+      <div class="phone"><div class="screen">
+        <div class="st sans"><span><b>9:41</b></span><span>●●● ▮</span></div>
+        <div style="position:relative;flex:none">
+          <div class="nav" style="position:absolute;left:0;right:0;top:0;z-index:2">
+            <span class="nav-back"></span><span class="nav-t"></span><span class="nav-r sans">分享</span>
+          </div>
+          <div class="d-art" style="margin:0;border:none;border-bottom:1px solid var(--hairline)">🌹
+            <span class="art-tag sans" style="font-size:10px;padding:5px 10px">花间里 · 湖滨店 出品</span>
+          </div>
+        </div>
+        <div class="d-dots"><i class="on"></i><i></i><i></i><i></i></div>
+        <div class="d-head">
+          <div><span class="d-sales sans">月售 42 · ★ 4.9</span><span class="d-price sans" style="font-family:Georgia,serif">¥168<small>起</small></span><span class="d-was sans">¥198</span></div>
+          <div class="d-name">郁见你 · 红玫瑰花束</div>
+          <div class="d-sub sans">RED ROSE BOUQUET · 适合生日 / 纪念日 / 表白</div>
+        </div>
+        <div class="d-quote">
+          <div class="qt sans">花语 · FLOWER WORD</div>
+          <div class="q">十一支红玫瑰，配满天星。热烈而不喧哗，<br>像一句说了很久、终于说出口的话。</div>
+        </div>
+        <div class="srows" style="margin:22px 26px 0;border-top:1px solid var(--hairline)">
+          <div class="srow"><span class="sk">主花材</span><span class="sv">红玫瑰 11 支 · 满天星 · 尤加利叶</span></div>
+          <div class="srow"><span class="sk">包装</span><span class="sv">雾面纸 + 麻绳 · 可选贺卡</span></div>
+          <div class="srow"><span class="sk">花期</span><span class="sv">约 5–7 天 · 附养护说明</span></div>
+          <div class="srow"><span class="sk">规格</span><span class="sv red" style="cursor:pointer">标准 / 加大 / 豪华 ▾</span></div>
+        </div>
+        <div class="promise">
+          <div class="promise-i"><b>01</b><span>现做现送 · 杭州同城 1 小时达</span></div>
+          <div class="promise-i"><b>02</b><span>不满意重做 · 签收 2 小时内可申诉</span></div>
+          <div class="promise-i" style="border-bottom:none"><b>03</b><span>可附手写贺卡 · AI 代拟文案</span></div>
+        </div>
+        <div style="height:20px"></div>
+        <div class="bottombar">
+          <div class="bb-fav sans"><i>♡</i>收藏</div>
+          <div class="bb-fav sans" style="position:relative"><i>⌂</i>花篮<span class="badge sans" style="top:-6px;right:-4px">2</span></div>
+          <div class="bb-acts"><span class="btn ghost">加入购物车</span><span class="btn">立即购买</span></div>
+        </div>
+      </div></div>
+      <div class="cap">
+        <div class="cap-no sans">SCREEN 05 · DETAIL</div>
+        <div class="cap-name">商品详情 · 花谱的一页</div>
+        <p class="cap-note sans">价格前置到标题上方，Georgia 衬线数字 + 「起」，配划线原价。花语做成朱砂竖线引用块，是详情页最有记忆点的一处。花材/包装/花期/规格是四行规格行。服务承诺用「01/02/03」朱砂编号，安静但有秩序。底栏双按钮：幽灵态加购 + 墨底立购。</p>
+      </div>
+    </div>
+
+    <!-- ========== 06 搜索 ========== -->
+    <div class="frame-wrap">
+      <div class="phone"><div class="screen">
+        <div class="st sans"><span><b>9:41</b></span><span>●●● ▮</span></div>
+        <div class="nav" style="gap:12px">
+          <span class="nav-back"></span>
+          <div style="flex:1;border-bottom:1px solid var(--ink);padding:8px 0;display:flex;align-items:center;gap:8px">
+            <span style="font-size:14px;letter-spacing:.06em">玫瑰</span><span style="width:1px;height:15px;background:var(--crimson);animation:pulse 1s infinite"></span>
+            <span class="sans" style="margin-left:auto;font-size:11px;color:var(--crimson);letter-spacing:.14em">搜索</span>
+          </div>
+        </div>
+        <div class="nav-rule"></div>
+        <div style="padding:24px 26px;flex:1">
+          <div style="font-size:11px;letter-spacing:.28em;color:#675f51;margin-bottom:16px" class="sans">猜你想找</div>
+          <div class="chip-row" style="margin-bottom:32px">
+            <span class="chip sans">红玫瑰</span><span class="chip sans">香槟玫瑰</span><span class="chip sans">玫瑰花盒</span><span class="chip sans">11 朵玫瑰</span><span class="chip sans">生日玫瑰</span>
+          </div>
+          <div style="font-size:11px;letter-spacing:.28em;color:#675f51;margin-bottom:6px" class="sans">最近搜过</div>
+          <div class="list" style="margin:0">
+            <div class="li"><span class="li-t">奶油郁金香</span><span class="li-v sans">花束</span></div>
+            <div class="li"><span class="li-t">野生花社</span><span class="li-v sans">花店</span></div>
+            <div class="li"><span class="li-t">开业花篮</span><span class="li-v sans">场景</span></div>
+          </div>
+          <div style="text-align:center;margin-top:40px">
+            <div style="font-size:26px;opacity:.3">❀</div>
+            <div style="font-size:11px;color:#544e44;letter-spacing:.16em;margin-top:12px">输入花名、花店，或一个场景</div>
+            <div class="sans" style="font-size:10px;color:#675f51;letter-spacing:.12em;margin-top:6px">「送妈妈」「道歉」「预算 200」都能搜</div>
+          </div>
+        </div>
+      </div></div>
+      <div class="cap">
+        <div class="cap-no sans">SCREEN 06 · SEARCH</div>
+        <div class="cap-name">搜索 · 一条墨线下</div>
+        <p class="cap-note sans">搜索框只有下划线（墨色），输入光标是朱砂闪烁竖线。猜你想找用 chip，最近搜过用「文字行 + 类型标注（花束/花店/场景）」。空态一句话引导用户用自然语言搜——呼应 AI 顾问能力。</p>
+      </div>
+    </div>
+
+  </div>
+</section>
+<!-- ============================ 叁 · 问（AI） ============================ -->
+<section class="chapter" id="ch3">
+  <div class="ch-head">
+    <span class="ch-no sans">CHAPTER 03</span>
+    <h2 class="ch-title">叁 · 问 —— 花艺顾问，全站的灵魂</h2>
+    <span class="ch-line"></span>
+  </div>
+  <p class="ch-desc sans">对话区不用气泡堆砌：AI 的话是「朱砂 ✦ + 衬线正文」直接落在纸上，像顾问当面说话；只有用户自己的话用墨底反白。8 类卡片全部直角细框、深纸衬底，与商品卡同一套语言。等待期必须可见（思考 / 工具进度 / 生图脉冲）。对应路由：/advisor。</p>
+
+  <div class="row">
+
+    <!-- ========== 07 顾问 · 初始态 ========== -->
+    <div class="frame-wrap">
+      <div class="phone"><div class="screen">
+        <div class="st sans"><span><b>9:41</b></span><span>●●● ▮</span></div>
+        <div class="nav">
+          <span class="nav-back"></span>
+          <span class="nav-t">花艺顾问</span>
+          <span class="nav-r sans">≡ 会话</span>
+        </div>
+        <div class="nav-rule"></div>
+        <div class="adv-body">
+          <div class="adv-hero">
+            <div class="hero-date sans">ADVISOR · 跳舞兰花艺顾问</div>
+            <div class="adv-greet" style="margin-top:16px">说说要送给谁，<br>我给你配一束</div>
+            <div class="adv-sub sans">收花的人 · 场合 · 预算<br>三句话就够，剩下交给我</div>
+            <svg class="deco-svg" style="bottom:auto;top:110px;width:60px;height:80px;opacity:.85" viewBox="0 0 74 96" fill="none" stroke="#93372b" stroke-width="1.2" stroke-linecap="round">
+              <path d="M37 92 C37 68 34 54 37 38"/>
+              <path d="M37 64 C26 59 19 50 19 40 C28 43 34 51 37 60"/>
+              <path d="M37 54 C48 49 55 40 55 30 C46 33 40 41 37 50"/>
+              <circle cx="37" cy="26" r="5"/>
+              <path d="M37 21 C34 14 35 8 37 5 C39 8 40 14 37 21"/>
+            </svg>
+            <div class="adv-chips">
+              <span class="chip sans">生日祝福</span><span class="chip sans">道歉和好</span>
+              <span class="chip sans">表白心意</span><span class="chip sans">感谢帮助</span>
+            </div>
+            <div style="margin-top:34px;border-top:1px solid var(--hairline);padding-top:20px">
+              <div style="font-size:10px;letter-spacing:.28em;color:#675f51;margin-bottom:12px" class="sans">也可以这样问我</div>
+              <div style="font-size:11px;line-height:2.4;letter-spacing:.06em;color:var(--ink-mid)">
+                「预算 300 送妈妈，她喜欢素净的」<br>
+                「女朋友生日，淡色系，别太甜」<br>
+                「开业花篮，要撑场面」<br>
+                「这家店几点关门，能送到滨江吗」
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="adv-disc sans">本内容由 AI 生成，仅供参考 · 花材与价格以门店实际为准</div>
+        <div class="inputbar">
+          <div class="input">说说你的需求…</div>
+          <div class="send">↑</div>
+        </div>
+      </div></div>
+      <div class="cap">
+        <div class="cap-no sans">SCREEN 07 · ADVISOR HERO</div>
+        <div class="cap-name">顾问 · 初始态</div>
+        <p class="cap-note sans">hero 只在「无非 greeting 消息」时渲染（与线上逻辑一致）。4 个预设 chips 常驻顶部。新增「也可以这样问我」四行示例——用真实句式教会用户怎么提问，比空等光标有效。AIGC 合规标识常驻输入栏上方，不能省。</p>
+      </div>
+    </div>
+
+    <!-- ========== 08 顾问 · 对话中 + 商品卡 ========== -->
+    <div class="frame-wrap">
+      <div class="phone"><div class="screen">
+        <div class="st sans"><span><b>9:41</b></span><span>●●● ▮</span></div>
+        <div class="nav">
+          <span class="nav-back"></span>
+          <span class="nav-t">花艺顾问</span>
+          <span class="nav-r sans">≡ 会话</span>
+        </div>
+        <div class="nav-rule"></div>
+        <div class="adv-body" style="padding-bottom:10px">
+          <div class="chip-row" style="margin-top:18px">
+            <span class="chip on sans">生日祝福</span><span class="chip sans">道歉和好</span><span class="chip sans">表白心意</span>
+          </div>
+          <div class="msg-u"><span class="sans">送女朋友生日，预算 300 左右，她喜欢淡色系</span></div>
+          <div class="msg">
+            <span class="msg-glyph">✦</span>
+            <div style="flex:1;min-width:0">
+              <div class="msg-txt">淡色系又不甜，我建议往<b>奶油白 + 浅杏</b>走，避开正粉。挑了三束在你预算内，都是花间里今天有货的：</div>
+              <div class="hcards">
+                <div class="hc">
+                  <div class="hc-art">💐</div>
+                  <div class="hc-name">奶油郁金香</div>
+                  <div class="hc-shop sans">花间里 · 有货</div>
+                  <div class="hc-foot"><span class="hc-price sans" style="font-family:Georgia,serif">¥168</span><span class="hc-btn">加购</span></div>
+                </div>
+                <div class="hc">
+                  <div class="hc-art">🌸</div>
+                  <div class="hc-name">粉雾清晨</div>
+                  <div class="hc-shop sans">花间里 · 有货</div>
+                  <div class="hc-foot"><span class="hc-price sans" style="font-family:Georgia,serif">¥239</span><span class="hc-btn">加购</span></div>
+                </div>
+                <div class="hc">
+                  <div class="hc-art">🌼</div>
+                  <div class="hc-name">暖阳如初</div>
+                  <div class="hc-shop sans">野生花社</div>
+                  <div class="hc-foot"><span class="hc-price sans" style="font-family:Georgia,serif">¥268</span><span class="hc-btn">加购</span></div>
+                </div>
+              </div>
+              <div class="msg-txt" style="margin-top:16px;font-size:12px;color:var(--ink-mid)">想再独特一点，我也可以按她的喜好<b>配一束专属的</b>，给你出效果图先看。</div>
+              <div class="chip-row" style="margin-top:14px">
+                <span class="chip sans">要专属定制</span><span class="chip sans">预算再高点</span><span class="chip sans">换一家店</span>
+              </div>
+            </div>
+          </div>
+          <div class="msg-u"><span class="sans">要专属定制</span></div>
+          <div class="tool"><span class="tool-dot"></span><span class="sans">正在查询花材库存…</span></div>
+        </div>
+        <div class="adv-disc sans">本内容由 AI 生成，仅供参考</div>
+        <div class="inputbar">
+          <div class="input">继续说…</div>
+          <div class="send" style="background:none;color:var(--crimson);border-color:var(--crimson);font-size:10px;letter-spacing:.1em" >停止</div>
+        </div>
+      </div></div>
+      <div class="cap">
+        <div class="cap-no sans">SCREEN 08 · ADVISOR CHAT</div>
+        <div class="cap-name">顾问 · 对话与商品卡</div>
+        <p class="cap-note sans">plan_card 横滑渲染 <code style="font-family:Consolas,monospace;font-size:11px">data.data.plans</code>（<b>不是</b>顶层 products，交接单 §1.1 的坑）。卡片带店铺名与库存态，「加购」用 id + shop_id。AI 追问用 dialog_options chips，点选即以用户消息回传。底部「停止」= AbortController，流式中按钮变朱砂描边。</p>
+      </div>
+    </div>
+
+    <!-- ========== 09 顾问 · DIY 卡 + 生图 ========== -->
+    <div class="frame-wrap">
+      <div class="phone"><div class="screen">
+        <div class="st sans"><span><b>9:41</b></span><span>●●● ▮</span></div>
+        <div class="nav">
+          <span class="nav-back"></span>
+          <span class="nav-t">花艺顾问</span>
+          <span class="nav-r sans">≡ 会话</span>
+        </div>
+        <div class="nav-rule"></div>
+        <div class="adv-body" style="padding-bottom:8px">
+          <div class="msg" style="margin-top:18px">
+            <span class="msg-glyph">✦</span>
+            <div style="flex:1;min-width:0">
+              <div class="msg-txt" style="font-size:12px">按她喜欢淡色系，我给你配了这一束 —— 香槟玫瑰打底，洋桔梗提亮，尤加利压住甜度：</div>
+              <div class="diy">
+                <div class="diy-head">
+                  <div>
+                    <div class="diy-k sans">DIY PLAN · 专属方案</div>
+                    <div class="diy-name">奶油与晨雾</div>
+                  </div>
+                  <div class="diy-price sans" style="font-family:Georgia,serif">约 ¥200<small class="sans">含花材 + 包装</small></div>
+                </div>
+                <div class="diy-sec">
+                  <div class="diy-sec-t sans">用料 · MATERIALS</div>
+                  <div class="diy-sec-b">主花 <b>香槟玫瑰 9 支</b> · 配材 <b>白洋桔梗 5 支</b><br>叶材 <b>尤加利 3 支</b> · 包装 <b>雾面纸 + 麻绳</b></div>
+                </div>
+                <div class="diy-sec">
+                  <div class="diy-sec-t sans">花艺步骤 · STEPS</div>
+                  <div class="diy-step"><i>01</i><span>玫瑰去刺留 40cm，螺旋打底定圆</span></div>
+                  <div class="diy-step"><i>02</i><span>洋桔梗插外圈提亮，高低错落</span></div>
+                  <div class="diy-step"><i>03</i><span>尤加利收尾遮泥，麻绳扎口</span></div>
+                </div>
+                <div class="diy-sec" style="border-bottom:none">
+                  <div class="diy-sec-t sans">养护 · CARE</div>
+                  <div class="diy-sec-b">斜剪根 45°，两日换水，避阳光直射 · 花期约 7 天</div>
+                </div>
+                <div class="diy-acts">
+                  <span class="btn ghost sm">复制用料清单</span>
+                  <span class="btn sm">生成效果图</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="msg-u"><span class="sans">给我看看效果图</span></div>
+          <div class="msg" style="margin-top:16px">
+            <span class="msg-glyph">✦</span>
+            <div style="flex:1;min-width:0">
+              <div class="msg-txt" style="font-size:12px">正在画，大约要等半分钟：</div>
+              <div class="gen">
+                <div class="gen-art"><span class="emoji">💐</span><span class="gen-pulse"></span></div>
+                <div class="gen-bar"><i></i></div>
+                <div class="gen-txt sans"><span>生成中 · 00:26</span><span>任务 task_img_0001</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="adv-disc sans">本内容由 AI 生成，仅供参考</div>
+        <div class="inputbar">
+          <div class="input">继续说…</div>
+          <div class="send">↑</div>
+        </div>
+      </div></div>
+      <div class="cap">
+        <div class="cap-no sans">SCREEN 09 · DIY &amp; IMAGE TASK</div>
+        <div class="cap-name">顾问 · DIY 方案卡与生图</div>
+        <p class="cap-note sans"><b>DIY 卡不出现「立即购买」</b>——它无商品 id，结算必失败（交接单 §2 的坑）。出口只有两个：复制用料清单 / 生成效果图。卡片用墨色 1px 实边框（比商品卡的发丝线重一档），表示「这是为你定制的」。生图 &gt;40s，必须给脉冲进度 + 计时 + 任务号，否则用户以为卡死。</p>
+      </div>
+    </div>
+
+    <!-- ========== 10 顾问 · 贺卡/订单/店铺卡 ========== -->
+    <div class="frame-wrap">
+      <div class="phone"><div class="screen">
+        <div class="st sans"><span><b>9:41</b></span><span>●●● ▮</span></div>
+        <div class="nav">
+          <span class="nav-back"></span>
+          <span class="nav-t">花艺顾问</span>
+          <span class="nav-r sans">≡ 会话</span>
+        </div>
+        <div class="nav-rule"></div>
+        <div class="adv-body" style="padding-bottom:8px">
+          <div class="msg" style="margin-top:18px">
+            <span class="msg-glyph">✦</span>
+            <div style="flex:1;min-width:0">
+              <div class="msg-txt" style="font-size:12px">贺卡我拟了一版，可以直接改字：</div>
+              <div style="margin-top:14px;border:1px solid var(--border);background:var(--paper-deep);position:relative">
+                <div style="height:104px;display:grid;place-items:center;border-bottom:1px dashed var(--border);position:relative">
+                  <span style="font-size:34px;opacity:.75">🌷</span>
+                  <span class="art-tag sans" style="font-size:9px">GREETING CARD</span>
+                </div>
+                <div style="padding:14px 16px 6px">
+                  <div style="font-size:12px;line-height:2;letter-spacing:.06em;color:var(--ink-mid)">愿你新的一岁，<br>如这束花，安静且明亮。</div>
+                  <div class="sans" style="font-size:10px;color:#675f51;letter-spacing:.12em;margin-top:10px;text-align:right">—— 致 小满</div>
+                </div>
+                <div style="display:flex;gap:10px;padding:10px 16px 14px">
+                  <span class="btn hair sm" style="flex:1">换一张</span>
+                  <span class="btn ghost sm" style="flex:1">改文案</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="msg-u"><span class="sans">就要这个，帮我下单</span></div>
+          <div class="msg" style="margin-top:16px">
+            <span class="msg-glyph">✦</span>
+            <div style="flex:1;min-width:0">
+              <div class="msg-txt" style="font-size:12px">好，已经为你整理好这一单：</div>
+              <div style="margin-top:14px;border:1px solid var(--hairline)">
+                <div style="padding:12px 16px;border-bottom:1px solid var(--hairline);display:flex;justify-content:space-between;align-items:baseline">
+                  <span style="font-size:11px;letter-spacing:.14em;font-weight:600">花间里 · 湖滨店</span>
+                  <span class="sans" style="font-size:10px;color:#675f51;letter-spacing:.1em">30 分钟达</span>
+                </div>
+                <div class="gm" style="padding:12px 16px">
+                  <div class="gm-art">💐</div>
+                  <div class="gm-name">奶油郁金香<small class="sans">标准 · 附贺卡</small></div>
+                  <div class="gm-price sans" style="font-family:Georgia,serif">¥168</div>
+                </div>
+                <div style="padding:10px 16px;border-top:1px solid var(--hairline);display:flex;justify-content:space-between;font-size:11px;color:#675f51;letter-spacing:.08em" class="sans">
+                  <span>配送 ¥10 · 贺卡 ¥0</span><span>合计 <b style="font-size:15px;color:#93372b;font-weight:600">¥178</b></span>
+                </div>
+              </div>
+              <div style="display:flex;gap:10px;margin-top:14px">
+                <span class="btn ghost sm" style="flex:1">查看订单</span>
+                <span class="btn red sm" style="flex:1">确认下单</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="adv-disc sans">本内容由 AI 生成，仅供参考</div>
+        <div class="inputbar">
+          <div class="input">继续说…</div>
+          <div class="send">↑</div>
+        </div>
+      </div></div>
+      <div class="cap">
+        <div class="cap-no sans">SCREEN 10 · GREETING / ORDER</div>
+        <div class="cap-name">顾问 · 贺卡卡与订单卡</div>
+        <p class="cap-note sans">greeting_card：图区 + 中央虚线撕口 + 文案 + 署名，「换一张/改文案」两个动作。order_card：店头 + 商品行 + 合计，<b>「确认下单」是全站唯一朱砂实心按钮</b>——像盖章，只给承诺动作。pay_jump 卡同理，复用此形态 + 「去支付」。</p>
+      </div>
+    </div>
+
+  </div>
+</section>
+<!-- ============================ 肆 · 买 ============================ -->
+<section class="chapter" id="ch4">
+  <div class="ch-head">
+    <span class="ch-no sans">CHAPTER 04</span>
+    <h2 class="ch-title">肆 · 买 —— 交易线保持安静，只在付款处用力</h2>
+    <span class="ch-line"></span>
+  </div>
+  <p class="ch-desc sans">购物车按店分组（一店一单结构不变）、结算页表单全部下划线化、订单用「●◉○」三态履约进度并标注「来自门店」——把真实性做成卖点（改版文档拍板事项 5 的落地形态）。朱砂实心只出现在「去支付」。对应路由：/cart、/checkout、/orders、/order/:id。</p>
+
+  <div class="row">
+
+    <!-- ========== 11 购物车 ========== -->
+    <div class="frame-wrap">
+      <div class="phone"><div class="screen">
+        <div class="st sans"><span><b>9:41</b></span><span>●●● ▮</span></div>
+        <div class="nav">
+          <span class="nav-t" style="margin-left:0">花篮</span>
+          <span class="nav-r sans">管理</span>
+        </div>
+        <div class="nav-rule"></div>
+        <div style="flex:1;overflow:hidden">
+          <div class="group-head">
+            <span class="shop-dot"></span><b>花间里 · 湖滨店</b><span class="sans">满 ¥199 免运费 · 还差 ¥31</span>
+          </div>
+          <div class="ci">
+            <div class="ci-art">💐</div>
+            <div class="ci-body">
+              <div class="ci-name">奶油郁金香</div>
+              <div class="ci-spec sans">标准 11 支 · 雾面纸 · 附贺卡</div>
+              <div class="ci-foot">
+                <span class="ci-price sans" style="font-family:Georgia,serif">¥168</span>
+                <div class="stepper"><button class="st-btn">−</button><span class="st-num">1</span><button class="st-btn">＋</button></div>
+              </div>
+            </div>
+          </div>
+          <div class="group-head">
+            <span class="shop-dot"></span><b>野生花社</b><span class="sans">45 分钟达</span>
+          </div>
+          <div class="ci">
+            <div class="ci-art">🌿</div>
+            <div class="ci-body">
+              <div class="ci-name">粉雾清晨</div>
+              <div class="ci-spec sans">加大 · 干花包装</div>
+              <div class="ci-foot">
+                <span class="ci-price sans" style="font-family:Georgia,serif">¥239</span>
+                <div class="stepper"><button class="st-btn">−</button><span class="st-num">1</span><button class="st-btn">＋</button></div>
+              </div>
+            </div>
+          </div>
+          <div style="margin:26px 26px 0;border-top:1px solid var(--hairline);padding-top:18px">
+            <div style="font-size:11px;letter-spacing:.28em;color:#675f51;margin-bottom:14px" class="sans">顺手带一束</div>
+            <div class="hcards" style="margin-top:0">
+              <div class="hc" style="width:118px"><div class="hc-art" style="height:118px;font-size:36px">🌼</div><div class="hc-name" style="font-size:11px">暖阳如初</div><div class="hc-foot" style="padding:6px 10px 9px"><span class="hc-price sans" style="font-size:12px;font-family:Georgia,serif">¥129</span><span class="hc-btn">＋</span></div></div>
+              <div class="hc" style="width:118px"><div class="hc-art" style="height:118px;font-size:36px">🌸</div><div class="hc-name" style="font-size:11px">浅杏薄暮</div><div class="hc-foot" style="padding:6px 10px 9px"><span class="hc-price sans" style="font-size:12px;font-family:Georgia,serif">¥149</span><span class="hc-btn">＋</span></div></div>
+              <div class="hc" style="width:118px"><div class="hc-art" style="height:118px;font-size:36px">🌷</div><div class="hc-name" style="font-size:11px">春日信笺</div><div class="hc-foot" style="padding:6px 10px 9px"><span class="hc-price sans" style="font-size:12px;font-family:Georgia,serif">¥159</span><span class="hc-btn">＋</span></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="bottombar">
+          <div class="bb-sum"><div class="k sans">合计 · 2 束（两店分单）</div><div class="v sans" style="font-family:Georgia,serif">¥407</div></div>
+          <span class="btn">去结算</span>
+        </div>
+      </div></div>
+      <div class="cap">
+        <div class="cap-no sans">SCREEN 11 · CART</div>
+        <div class="cap-name">购物车 · 按店分组</div>
+        <p class="cap-note sans">组头 = 朱砂点 + 店名 + 凑单提示（安静的小字，不做进度条）。「顺手带一束」横滑素卡补客单价。合计行明示「两店分单」管理预期。删除收进「管理」态，不在卡面放垃圾桶。</p>
+      </div>
+    </div>
+
+    <!-- ========== 12 结算 ========== -->
+    <div class="frame-wrap">
+      <div class="phone"><div class="screen">
+        <div class="st sans"><span><b>9:41</b></span><span>●●● ▮</span></div>
+        <div class="nav">
+          <span class="nav-back"></span>
+          <span class="nav-t">确认订单</span>
+        </div>
+        <div class="nav-rule"></div>
+        <div style="flex:1;overflow:hidden;padding-bottom:10px">
+          <div class="seg sans"><div class="seg-i on">配送</div><div class="seg-i">到店自提</div></div>
+          <div class="addr">
+            <span class="addr-ico"></span>
+            <div class="addr-body">
+              <div class="addr-name">林小满 <small class="sans">138 **** 8888</small></div>
+              <div class="addr-txt sans">杭州市 西湖区 湖滨路 88 号 3 单元 1202<br>（工作日白天可送，请放前台）</div>
+            </div>
+            <span class="li-arrow" style="margin-top:20px"></span>
+          </div>
+          <div class="srows" style="margin:18px 26px 0;border-top:1px solid var(--hairline)">
+            <div class="srow"><span class="sk">送达时间</span><span class="sv">今天 14:00 – 15:00 <span style="color:#93372b;font-size:11px">改 ›</span></span></div>
+            <div class="srow"><span class="sk">备注</span><span class="sv" style="color:#675f51">给骑手的话（选填）</span></div>
+          </div>
+          <div class="form-sec">
+            <div class="form-t sans">随花贺卡 · AI 代拟</div>
+            <div class="card-box">
+              <div class="ta">愿你新的一岁，如这束花，安静且明亮。</div>
+              <div class="ai-write sans">✦ 换一版</div>
+            </div>
+            <div class="chip-row" style="margin-top:10px">
+              <span class="chip sans">生日</span><span class="chip on sans">已选 AI 拟稿</span><span class="chip sans">不要贺卡</span>
+            </div>
+          </div>
+          <div style="margin:24px 26px 0">
+            <div style="font-size:11px;letter-spacing:.28em;color:#675f51;margin-bottom:6px" class="sans">花间里 · 湖滨店</div>
+            <div class="gm" style="border-top:1px solid var(--hairline)">
+              <div class="gm-art">💐</div>
+              <div class="gm-name">奶油郁金香<small class="sans">标准 · ×1</small></div>
+              <div class="gm-price sans" style="font-family:Georgia,serif">¥168</div>
+            </div>
+            <div class="gm" style="border-bottom:1px solid var(--hairline)">
+              <div class="gm-art">🌸</div>
+              <div class="gm-name">粉雾清晨<small class="sans">加大 · ×1 · 野生花社另单</small></div>
+              <div class="gm-price sans" style="font-family:Georgia,serif">¥239</div>
+            </div>
+          </div>
+          <div class="fee">
+            <div class="fee-r sans"><span>商品小计</span><span>¥407</span></div>
+            <div class="fee-r sans"><span>配送费（2 单）</span><span>¥10 + ¥12</span></div>
+            <div class="fee-r sans"><span>优惠券</span><span style="color:#93372b">−¥20</span></div>
+            <div class="fee-r total sans"><span>应付</span><span class="v" style="font-family:Georgia,serif">¥409</span></div>
+          </div>
+        </div>
+        <div class="bottombar">
+          <div class="bb-sum"><div class="k sans">两店分单 · 共 2 单</div><div class="v sans" style="font-family:Georgia,serif">¥409</div></div>
+          <span class="btn red">去支付</span>
+        </div>
+      </div></div>
+      <div class="cap">
+        <div class="cap-no sans">SCREEN 12 · CHECKOUT</div>
+        <div class="cap-name">结算 · 一张安静的表单</div>
+        <p class="cap-note sans">配送/自提用墨底反白 segmented（全站唯一深色块之一）。地址卡 = 朱砂定位针 + 姓名电话 + 备注小字。贺卡区直接嵌 AI 拟稿 +「换一版」——AI 能力在交易线的延伸。费用明细四行发丝线，优惠用朱砂「−¥20」。「去支付」朱砂实心，像盖章。</p>
+      </div>
+    </div>
+
+    <!-- ========== 13 订单列表 ========== -->
+    <div class="frame-wrap">
+      <div class="phone"><div class="screen">
+        <div class="st sans"><span><b>9:41</b></span><span>●●● ▮</span></div>
+        <div class="nav">
+          <span class="nav-back"></span>
+          <span class="nav-t">我的订单</span>
+          <span class="nav-r sans">客服</span>
+        </div>
+        <div class="nav-rule"></div>
+        <div class="o-tabs sans">
+          <span class="o-tab">全部</span><span class="o-tab on">配送中</span><span class="o-tab">待付款</span><span class="o-tab">制作中</span><span class="o-tab">待评价</span><span class="o-tab">退款</span>
+        </div>
+        <div style="flex:1;overflow:hidden;padding-bottom:14px">
+          <div class="o-card">
+            <div class="o-head"><span class="o-shop">花间里 · 湖滨店</span><span class="o-status sans" style="color:#93372b">配送中 · 预计 14:30 达</span></div>
+            <div class="o-goods">
+              <div class="gm" style="border-bottom:none;padding:14px 0">
+                <div class="gm-art">💐</div>
+                <div class="gm-name">奶油郁金香<small class="sans">标准 · ×1 · 附贺卡</small></div>
+                <div class="gm-price sans" style="font-family:Georgia,serif">¥168</div>
+              </div>
+            </div>
+            <div class="o-total sans">实付 <b style="font-family:Georgia,serif">¥178</b></div>
+            <div class="o-btns">
+              <span class="btn hair sm">联系骑手</span>
+              <span class="btn ghost sm">查看进度</span>
+            </div>
+          </div>
+          <div class="o-card">
+            <div class="o-head"><span class="o-shop">野生花社</span><span class="o-status sans">已完成 · 9 月 18 日</span></div>
+            <div class="o-goods">
+              <div class="gm" style="border-bottom:none;padding:14px 0">
+                <div class="gm-art">🌿</div>
+                <div class="gm-name">粉雾清晨<small class="sans">加大 · ×1</small></div>
+                <div class="gm-price sans" style="font-family:Georgia,serif">¥239</div>
+              </div>
+            </div>
+            <div class="o-total sans">实付 <b style="font-family:Georgia,serif">¥239</b></div>
+            <div class="o-btns">
+              <span class="btn hair sm">评价</span>
+              <span class="btn ghost sm">再来一单</span>
+            </div>
+          </div>
+          <div class="o-card" style="opacity:.72">
+            <div class="o-head"><span class="o-shop">向阳花艺</span><span class="o-status sans" style="color:#675f51">已取消 · 超时未付</span></div>
+            <div class="o-goods">
+              <div class="gm" style="border-bottom:none;padding:14px 0">
+                <div class="gm-art">🌹</div>
+                <div class="gm-name">郁见你<small class="sans">标准 · ×1</small></div>
+                <div class="gm-price sans" style="font-family:Georgia,serif">¥158</div>
+              </div>
+            </div>
+            <div class="o-btns" style="border-top:1px solid var(--hairline)">
+              <span class="btn ghost sm">重新购买</span>
+            </div>
+          </div>
+        </div>
+      </div></div>
+      <div class="cap">
+        <div class="cap-no sans">SCREEN 13 · ORDERS</div>
+        <div class="cap-name">订单列表 · 状态即朱砂</div>
+        <p class="cap-note sans">8 Tab 横滑保留，选中 = 朱砂短线。进行中状态（配送中/待付款）用朱砂字，完成态用苔色，取消态整卡降透明度 72%——不删除，像档案。按钮全部幽灵/发丝态，列表页不给朱砂实心。</p>
+      </div>
+    </div>
+
+    <!-- ========== 14 订单详情 ========== -->
+    <div class="frame-wrap">
+      <div class="phone"><div class="screen">
+        <div class="st sans"><span><b>9:41</b></span><span>●●● ▮</span></div>
+        <div class="nav">
+          <span class="nav-back"></span>
+          <span class="nav-t">订单详情</span>
+        </div>
+        <div class="nav-rule"></div>
+        <div style="flex:1;overflow:hidden">
+          <div class="od-hero">
+            <div class="od-status" style="color:var(--crimson)">骑手已取花</div>
+            <div class="od-sub sans">预计 14:30 前送达 · 单号 TWL20260924001 <span style="color:#93372b">复制</span></div>
+            <svg class="deco-svg" style="bottom:16px;width:52px;height:70px;opacity:.6" viewBox="0 0 74 96" fill="none" stroke="#93372b" stroke-width="1.2" stroke-linecap="round">
+              <path d="M37 92 C37 68 34 54 37 38"/><path d="M37 64 C26 59 19 50 19 40 C28 43 34 51 37 60"/>
+              <path d="M37 54 C48 49 55 40 55 30 C46 33 40 41 37 50"/><circle cx="37" cy="26" r="5"/>
+            </svg>
+          </div>
+          <div class="steps">
+            <div class="step done"><span class="step-line"></span><div class="step-dot"></div><div class="step-t sans">已付款</div></div>
+            <div class="step done"><span class="step-line"></span><div class="step-dot"></div><div class="step-t sans">门店接单</div></div>
+            <div class="step done"><span class="step-line"></span><div class="step-dot"></div><div class="step-t sans">制作中</div></div>
+            <div class="step now"><span class="step-line"></span><div class="step-dot"></div><div class="step-t sans">配送中</div></div>
+            <div class="step"><span class="step-line"></span><div class="step-dot"></div><div class="step-t sans">已送达</div></div>
+          </div>
+          <div style="text-align:center;margin-top:14px"><span class="tag sans" style="letter-spacing:.2em">履约进度来自门店 · 实时更新</span></div>
+          <div class="addr" style="margin-top:22px;cursor:default">
+            <span class="addr-ico"></span>
+            <div class="addr-body">
+              <div class="addr-name">林小满 <small class="sans">138 **** 8888</small></div>
+              <div class="addr-txt sans">西湖区 湖滨路 88 号 3 单元 1202 · 今天 14:00–15:00</div>
+            </div>
+          </div>
+          <div style="margin:18px 26px 0">
+            <div style="font-size:11px;letter-spacing:.28em;color:#675f51" class="sans">花间里 · 湖滨店</div>
+            <div class="gm" style="border-bottom:1px solid var(--hairline)">
+              <div class="gm-art">💐</div>
+              <div class="gm-name">奶油郁金香<small class="sans">标准 · ×1 · 附贺卡</small></div>
+              <div class="gm-price sans" style="font-family:Georgia,serif">¥168</div>
+            </div>
+          </div>
+          <div class="fee" style="margin-top:12px">
+            <div class="fee-r sans"><span>商品小计</span><span>¥168</span></div>
+            <div class="fee-r sans"><span>配送费</span><span>¥10</span></div>
+            <div class="fee-r total sans"><span>实付</span><span class="v" style="font-family:Georgia,serif">¥178</span></div>
+          </div>
+        </div>
+        <div class="bottombar">
+          <div class="bb-fav sans"><i>✆</i>联系骑手</div>
+          <div class="bb-fav sans"><i>☎</i>店铺客服</div>
+          <div style="flex:1"></div>
+          <span class="btn ghost sm">申请售后</span>
+        </div>
+      </div></div>
+      <div class="cap">
+        <div class="cap-no sans">SCREEN 14 · ORDER DETAIL</div>
+        <div class="cap-name">订单详情 · 门店履约进度</div>
+        <p class="cap-note sans">状态大字用朱砂（全站字号最大的朱砂，值得）。●◉○ 五步时间线：完成 = 朱砂实心，当前 = 朱砂圈 + 淡晕，未到 = 灰。「履约进度来自门店」tag 把真实性做成卖点。骑手电话用 tel:（小程序换 wx.makePhoneCall）。</p>
+      </div>
+    </div>
+
+  </div>
+</section>
+<!-- ============================ 伍 · 我的 ============================ -->
+<section class="chapter" id="ch5">
+  <div class="ch-head">
+    <span class="ch-no sans">CHAPTER 05</span>
+    <h2 class="ch-title">伍 · 我的 —— 补上缺页，收尾如一</h2>
+    <span class="ch-line"></span>
+  </div>
+  <p class="ch-desc sans">现状：/profile 挂的是 Placeholder.vue（「我的」页从未真正实现）。本章给出正式稿：用户卡 + 订单四快捷入口 + 名单式菜单，全部发丝线分隔。登录页只有品牌字、两条输入下划线、一个墨底按钮——克制风格的最佳落款。对应路由：/profile、/login、/settings。</p>
+
+  <div class="row">
+
+    <!-- ========== 15 我的 ========== -->
+    <div class="frame-wrap">
+      <div class="phone"><div class="screen">
+        <div class="st sans"><span><b>9:41</b></span><span>●●● ▮</span></div>
+        <div class="pf-head">
+          <div class="pf-avatar">林</div>
+          <div style="flex:1">
+            <div class="pf-name">林小满</div>
+            <div class="pf-phone sans">138 **** 8888 · 杭州</div>
+          </div>
+          <span class="nav-r sans">设置 ›</span>
+        </div>
+        <div class="shortcuts sans">
+          <div class="scut"><div class="scut-t">待付款</div></div>
+          <div class="scut"><div class="scut-t">制作中</div><span class="scut-n">1</span></div>
+          <div class="scut"><div class="scut-t">配送中</div><span class="scut-n">1</span></div>
+          <div class="scut"><div class="scut-t">待评价</div></div>
+        </div>
+        <div class="sec" style="padding-top:26px">
+          <div class="sec-head"><span class="sec-title">我的</span><span class="sec-line"></span></div>
+        </div>
+        <div class="list">
+          <div class="li"><span class="li-t">全部订单</span><span class="li-v sans">6 单</span><span class="li-arrow"></span></div>
+          <div class="li"><span class="li-t">收货地址</span><span class="li-v sans">3 个</span><span class="li-arrow"></span></div>
+          <div class="li"><span class="li-t">我的收藏</span><span class="li-v sans">12 束</span><span class="li-arrow"></span></div>
+          <div class="li"><span class="li-t">我的花方 · DIY 方案</span><span class="li-v sans">2 份</span><span class="li-arrow"></span></div>
+          <div class="li"><span class="li-t">优惠券</span><span class="li-v sans" style="color:#93372b">1 张可用</span><span class="li-arrow"></span></div>
+        </div>
+        <div class="sec" style="padding-top:26px">
+          <div class="sec-head"><span class="sec-title">服务</span><span class="sec-line"></span></div>
+        </div>
+        <div class="list">
+          <div class="li"><span class="li-t">花艺顾问 · 对话记录</span><span class="li-v sans">4 个会话</span><span class="li-arrow"></span></div>
+          <div class="li"><span class="li-t">联系客服</span><span class="li-v sans">07:00–22:00</span><span class="li-arrow"></span></div>
+          <div class="li"><span class="li-t">关于跳舞兰</span><span class="li-arrow"></span></div>
+        </div>
+        <div style="text-align:center;padding:34px 0 30px">
+          <div style="font-size:15px;letter-spacing:.4em;font-weight:600;text-indent:.4em">跳舞兰</div>
+          <div class="sans" style="font-size:9px;letter-spacing:.3em;color:#675f51;margin-top:8px">TIAOWULAN · SINCE 2026</div>
+        </div>
+        <nav class="tabbar sans">
+          <div class="tab">首页</div><div class="tab">花店</div><div class="tab">顾问</div><div class="tab" style="position:relative">花篮<span class="badge">2</span></div><div class="tab active">我的</div>
+        </nav>
+      </div></div>
+      <div class="cap">
+        <div class="cap-no sans">SCREEN 15 · PROFILE</div>
+        <div class="cap-name">我的 · 正式稿（替换 Placeholder）</div>
+        <p class="cap-note sans">头像 = 姓氏单字圆框（比 emoji 头像更贴气质，设置页可换图）。订单四快捷入口带朱砂角标。「我的花方」把 AI 生成的 DIY 方案沉淀为资产，是顾问页的回流入口。页尾品牌落款居中，像刊物的版权页。</p>
+      </div>
+    </div>
+
+    <!-- ========== 16 登录 ========== -->
+    <div class="frame-wrap">
+      <div class="phone"><div class="screen">
+        <div class="st sans"><span><b>9:41</b></span><span>●●● ▮</span></div>
+        <div class="nav"><span class="nav-back"></span><span class="nav-t"></span></div>
+        <div class="lg-body">
+          <div class="lg-brand">跳舞兰</div>
+          <div class="lg-sub sans">TIAOWULAN · AI FLOWER HOUSE</div>
+          <div class="lg-rule"></div>
+          <div class="field">
+            <div class="field-label sans">手机号</div>
+            <div class="field-input"><span>138 8888 8888</span></div>
+          </div>
+          <div class="field">
+            <div class="field-label sans">验证码</div>
+            <div class="field-input"><span class="ph">六位数字</span><span class="code-btn sans">获取验证码</span></div>
+          </div>
+          <div class="lg-btns">
+            <span class="btn block">登 录</span>
+            <span class="btn ghost block">微信一键登录</span>
+          </div>
+          <div class="agree sans">
+            <i class="on"></i>
+            <span>已阅读并同意 <b>《服务协议》</b> 与 <b>《隐私政策》</b>；未注册手机号验证后自动创建账号。</span>
+          </div>
+          <div style="margin-top:auto;padding-bottom:44px;text-align:center">
+            <div style="font-size:26px;opacity:.35">❀</div>
+            <div class="sans" style="font-size:10px;letter-spacing:.24em;color:#675f51;margin-top:12px">同城花店 · 一小时送达 · AI 花艺顾问</div>
+          </div>
+        </div>
+      </div></div>
+      <div class="cap">
+        <div class="cap-no sans">SCREEN 16 · LOGIN</div>
+        <div class="cap-name">登录 · 品牌字的落款</div>
+        <p class="cap-note sans">大字距刊名 + 拉丁小字 + 一道墨线，就是全部头图。输入框只有 label 小字 + 下划线。协议勾选是圆形朱砂点。微信一键登录放幽灵态——H5 里走网页授权，小程序里换 wx.login（后端 openid 体系不同，需 unionid 归一）。</p>
+      </div>
+    </div>
+
+    <!-- ========== 17 券中心（票券形态） ========== -->
+    <div class="frame-wrap">
+      <div class="phone"><div class="screen">
+        <div class="st sans"><span><b>9:41</b></span><span>●●● ▮</span></div>
+        <div class="nav">
+          <span class="nav-back"></span>
+          <span class="nav-t">券中心</span>
+          <span class="nav-r sans">我的券 ›</span>
+        </div>
+        <div class="nav-rule"></div>
+        <div style="flex:1;padding:24px 26px">
+          <!-- 票券：全站唯一"破坏网格"的元素 -->
+          <div style="position:relative;border:1px solid var(--border);background:var(--paper);margin-bottom:22px">
+            <div style="position:absolute;left:-7px;top:50%;transform:translateY(-50%);width:12px;height:12px;border-radius:50%;background:var(--canvas);border:1px solid var(--border);border-left-color:transparent"></div>
+            <div style="position:absolute;right:-7px;top:50%;transform:translateY(-50%);width:12px;height:12px;border-radius:50%;background:var(--canvas);border:1px solid var(--border);border-right-color:transparent"></div>
+            <div style="display:flex;align-items:center">
+              <div style="width:110px;text-align:center;padding:22px 0;border-right:1px dashed var(--border);flex:none">
+                <div class="sans" style="font-family:Georgia,serif;font-size:30px;color:#93372b">¥20</div>
+                <div class="sans" style="font-size:9px;letter-spacing:.2em;color:#675f51;margin-top:6px">满 ¥99 可用</div>
+              </div>
+              <div style="flex:1;padding:16px 14px">
+                <div style="font-size:13px;font-weight:600;letter-spacing:.1em">生日花礼券</div>
+                <div class="sans" style="font-size:10px;color:#675f51;letter-spacing:.08em;margin-top:7px;line-height:1.9">限当月生日用户 · 全城通用<br>有效期至 2026.10.31</div>
+              </div>
+              <div style="padding-right:14px;flex:none"><span class="btn sm">领取</span></div>
+            </div>
+          </div>
+          <div style="position:relative;border:1px solid var(--border);background:var(--paper);margin-bottom:22px;opacity:.55">
+            <div style="position:absolute;left:-7px;top:50%;transform:translateY(-50%);width:12px;height:12px;border-radius:50%;background:var(--canvas);border:1px solid var(--border);border-left-color:transparent"></div>
+            <div style="position:absolute;right:-7px;top:50%;transform:translateY(-50%);width:12px;height:12px;border-radius:50%;background:var(--canvas);border:1px solid var(--border);border-right-color:transparent"></div>
+            <div style="display:flex;align-items:center">
+              <div style="width:110px;text-align:center;padding:22px 0;border-right:1px dashed var(--border);flex:none">
+                <div class="sans" style="font-family:Georgia,serif;font-size:30px;color:#544e44">9折</div>
+                <div class="sans" style="font-size:9px;letter-spacing:.2em;color:#675f51;margin-top:6px">无门槛</div>
+              </div>
+              <div style="flex:1;padding:16px 14px">
+                <div style="font-size:13px;font-weight:600;letter-spacing:.1em">新客见面券</div>
+                <div class="sans" style="font-size:10px;color:#675f51;letter-spacing:.08em;margin-top:7px">仅限首单 · 已被领完</div>
+              </div>
+              <div style="padding-right:14px;flex:none"><span class="btn hair sm">已抢光</span></div>
+            </div>
+          </div>
+          <div style="margin-top:36px;border-top:1px solid var(--hairline);padding-top:18px">
+            <div style="font-size:10px;letter-spacing:.28em;color:#675f51;margin-bottom:10px" class="sans">用券说明</div>
+            <div style="font-size:11px;color:var(--ink-mid);line-height:2.2;letter-spacing:.04em" class="sans">
+              · 每单限用一张，不与其他活动叠加<br>
+              · 多店分单时，券作用于金额最高的一单<br>
+              · 退款成功后，未过期的券将退回账户
+            </div>
+          </div>
+        </div>
+      </div></div>
+      <div class="cap">
+        <div class="cap-no sans">SCREEN 17 · COUPONS</div>
+        <div class="cap-name">券中心 · 票券形态</div>
+        <p class="cap-note sans">沿用标本册版验证过的「票券」语言：双侧半圆缺口 + 中央虚线撕口，是全站唯一允许破坏直角网格的元素（像一张真的票）。面额用 Georgia 衬线数字 + 朱砂。已抢光降透明度 + 远墨。我的券页复用同形态，加「去使用」。</p>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ============================ 卷尾 · 三方向拍板 ============================ -->
+<section class="chapter" id="decision">
+  <div class="ch-head">
+    <span class="ch-no sans">APPENDIX</span>
+    <h2 class="ch-title">卷尾 · 三套方向摆在一起，评审一次拍板</h2>
+    <span class="ch-line"></span>
+  </div>
+  <p class="ch-desc sans">仓库现存三套互斥且均未全站落地的视觉方向。为避免第四次摇摆，建议评审会上逐列对比后当场定案；定案后按下方「落地八步」执行，不再开新方向。</p>
+
+  <div class="spec-wrap" style="margin-top:36px">
+    <table class="token-tbl" style="margin-bottom:8px">
+      <thead><tr><th style="width:14%">方向</th><th style="width:20%">主色 / 色板</th><th style="width:22%">气质与出处</th><th style="width:22%">现状</th><th style="width:22%">我的评估</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><b>金橙方案</b><br><span class="sans" style="font-size:9px;letter-spacing:.14em">09-18 · logo 反推</span></td>
+          <td><span class="new">#F5A013 金橙</span> + 珊瑚红 #EE4B2B + 宝蓝 #0B78C0<br><span style="color:#675f51">暖白底 · 圆角 16px · 暖褐阴影</span></td>
+          <td class="sans" style="font-size:10px;line-height:1.9">贴 logo 与文心兰本色，识别度高；电商促销感强，卡片+阴影+圆角是标准电商语言</td>
+          <td class="sans" style="font-size:10px">0 落地（src 全量 grep 无命中）；文档含完整字阶/组件/6 件拍板事</td>
+          <td class="sans" style="font-size:10px;line-height:1.9">最安全、最像"卖花的"，但离"精美有设计感"最远；与线上顾问页（标本册）气质冲突最大</td>
+        </tr>
+        <tr>
+          <td><b>标本册方案</b><br><span class="sans" style="font-size:9px;letter-spacing:.14em">09-22 · SPEC.md v5</span></td>
+          <td><span class="new">#2B4133 墨绿</span> + 金铜 #A58449 + 暖纸 #F5F1E9<br><span style="color:#675f51">直角相纸框 · 4 套可切换主题</span></td>
+          <td class="sans" style="font-size:10px;line-height:1.9">植物学标本册；宋体+拉丁衬线编号+票券+印章；工程规范最完整（组件映射表+八步迁移）</td>
+          <td class="sans" style="font-size:10px"><b>已上线</b>：Advisor / AdvisorCards / AdvisorDiyCard 三页整套落地（私有作用域 token，三处复制）</td>
+          <td class="sans" style="font-size:10px;line-height:1.9">唯一有线上资产的方向；装饰元素多（印章/胶带/❦），克制感弱于 v0.3/v0.4；若选它，AI 页零返工</td>
+        </tr>
+        <tr style="background:#f0e9db">
+          <td><b>文艺朱砂 v0.4</b><br><span class="sans" style="font-size:9px;letter-spacing:.14em">本稿 · 用户已选</span></td>
+          <td><span class="new">#93372B 朱砂</span> + 宣纸 #F6F1E7 + 墨 #23221D<br><span style="color:#675f51">发丝线 · 零阴影 · 圆角≤4px</span></td>
+          <td class="sans" style="font-size:10px;line-height:1.9">对标实测：观夏（衬线+留白+零阴影零圆角）、ROSEONLY（价格不嘶吼）、WeUI（透明度文字体系）；v0.3 草稿的克制化延伸</td>
+          <td class="sans" style="font-size:10px">redesign-preview v0.3 一屏草稿；本稿扩为 17 屏全站 + 规范</td>
+          <td class="sans" style="font-size:10px;line-height:1.9">最"精美有设计感"、与你们最初的诉求（小众精美参考）最贴；代价：AI 顾问三页需从墨绿换肤为朱砂（token 已集中，改动可控）</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="spec-grid" style="margin-top:44px;gap:48px 72px">
+      <div class="spec-sec">
+        <div class="spec-h sans">RECOMMENDATION</div>
+        <div class="spec-t">我的推荐：v0.4 朱砂为全站基调，收编标本册的两件遗产</div>
+        <p class="spec-d sans" style="margin-bottom:16px">理由三条，都可验证：</p>
+        <div class="rules" style="border-top:none">
+          <div class="rule" style="padding-right:28px"><i class="sans">WHY 01</i><b>气质同宗，合并成本最低</b><p class="sans">标本册与 v0.4 都是「暖纸 + 宋体 + 发丝线」家族，差异只在主色（墨绿 vs 朱砂）与装饰密度。AI 页三处私有 token 收敛为全局 tokens 后，换主色是一次变量替换，不是重写。</p></div>
+          <div class="rule" style="padding-right:28px"><i class="sans">WHY 02</i><b>朱砂更贴品牌红</b><p class="sans">logo 采样里珊瑚红 #E04020 系是第二主色；朱砂 #93372B 是它的降饱和版，比墨绿离品牌更近，比金橙更高级。花是红色的生意，纸是白色的生意——朱砂落在纸上，才是花店。</p></div>
+          <div class="rule" style="padding-right:28px"><i class="sans">WHY 03</i><b>保留两件被验证的遗产</b><p class="sans">① 票券形态（券中心第 17 屏已采用）；② 「●◉○ 履约进度 + 来自门店」角标（订单详情第 14 屏已采用）。装饰纪律照搬 SPEC §6：印章≤3处、每屏≤1母题。</p></div>
+          <div class="rule" style="padding-right:28px"><i class="sans">RISK</i><b>风险与对策</b><p class="sans">朱砂在「促销感」上弱于金橙：大促期可用主题切换机制（标本册已验证 body class 换肤可行）临时挂 t-blush 柔粉主题，节后收回。日常态坚持朱砂 ≤4 处/屏。</p></div>
+        </div>
+      </div>
+      <div class="spec-sec">
+        <div class="spec-h sans">LANDING PLAN</div>
+        <div class="spec-t">定稿后的落地八步（沿用 SPEC §8 骨架，替换目标皮肤）</div>
+        <table class="token-tbl">
+          <thead><tr><th style="width:8%">步</th><th>内容</th><th style="width:34%">涉及</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td>拍板主色 → 新建 <code>tokens-v04.scss</code>（本稿色板+字阶全量），tokens.scss 保留回退</td><td class="sans" style="font-size:10px">src/styles/</td></tr>
+            <tr><td>2</td><td>基础组件皮肤：素卡 plate / btn 三态 / tag / chip / 票券 / SectionHead；顺手清掉 543 处硬编码色与 79 处裸 rpx</td><td class="sans" style="font-size:10px">components/ + styles/</td></tr>
+            <tr><td>3</td><td>TabBar 改 5 项纯文字（首页/花店/顾问/花篮/我的），删 10 张 png</td><td class="sans" style="font-size:10px">TabBar.vue、router</td></tr>
+            <tr><td>4</td><td>首页（第 01 屏）：日期刊头 + hero + AI 素行 + 名单式花店</td><td class="sans" style="font-size:10px">Home.vue</td></tr>
+            <tr><td>5</td><td>逛与选：花店列表/店铺详情/分类/搜索/详情（第 02–06 屏）</td><td class="sans" style="font-size:10px">Shops、ShopDetail、Category、Search、Detail</td></tr>
+            <tr><td>6</td><td>交易线：购物车/结算（第 11–12 屏）；支付四通道逻辑不动只换皮</td><td class="sans" style="font-size:10px">Cart、Checkout</td></tr>
+            <tr><td>7</td><td>订单线：列表 + 详情履约进度（第 13–14 屏）</td><td class="sans" style="font-size:10px">Orders、OrderDetail、Review</td></tr>
+            <tr><td>8</td><td>AI 域换肤（墨绿→朱砂，token 收敛为全局引用）+ 我的/登录/券（第 07–10、15–17 屏）；/profile 正式实现替换 Placeholder</td><td class="sans" style="font-size:10px">Advisor 三件套、Placeholder→Profile、Login、CouponCenter</td></tr>
+          </tbody>
+        </table>
+        <div class="refs sans" style="margin-top:20px">
+          <b>小程序端（讨论定案后再启动）：</b>本稿所有 rpx 数值按 375 宽 ×2 即 750 稿数值，与小程序 rpx 同尺度（交接单 §7.4 已确认）。
+          token 同名写入 app.wxss；SSE 换 wx.request enableChunked 适配器；纯函数（diyPlan/agentAsset/extractDiyPlan）直接搬。
+          技术路线（原生双端 vs uni-app 一码多端）待你们确认小程序现有代码归属后另出一页决策单。
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+</div></main>
+<div class="toast sans" id="toast"></div>
+<script>
+function showToast(t){var el=document.getElementById('toast');el.textContent=t;el.style.opacity=1;clearTimeout(window.tt);window.tt=setTimeout(function(){el.style.opacity=0},1500)}
+function pick(el,cls){var p=el.parentNode;p.querySelectorAll('.'+cls).forEach(function(x){x.classList.remove('on','active')});el.classList.add(cls==='scene'?'active':'on')}
+document.addEventListener('click',function(e){
+  var t=e.target;
+  if(t.closest('.btn,.chip,.piece,.shop,.sc,.li,.tab,.scene,.seg-i,.o-tab,.fb-i,.hc-btn,.send,.code-btn,.ai-write,.piece-add')){
+    var n=t.closest('.btn,.chip,.piece,.shop,.sc,.li,.tab,.scene,.seg-i,.o-tab,.fb-i,.hc-btn,.send,.code-btn,.ai-write,.piece-add');
+    showToast((n.textContent||'').trim().replace(/\s+/g,' ').slice(0,18)||'·');
+  }
+});
+</script>
+</body>
+</html>
