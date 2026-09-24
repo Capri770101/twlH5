@@ -2,7 +2,7 @@
   <div class="page">
     <NavBar title="我的方案" />
 
-    <div v-if="plans.length === 0" class="empty">
+    <div v-if="!loading && plans.length === 0" class="empty">
       <div class="empty-emoji">💐</div>
       <div class="empty-title">还没有保存的方案</div>
       <div class="empty-sub">问问 AI 花艺顾问，让它帮你 DIY 一束</div>
@@ -61,7 +61,7 @@
         </div>
 
         <div class="plan-actions">
-          <button class="plan-btn cart" @click="onAdd(p)">加入购物车</button>
+          <span class="plan-quote">定制方案需向花店确认报价</span>
           <button class="plan-btn del" @click="onRemove(p)">删除</button>
         </div>
       </div>
@@ -71,16 +71,41 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import NavBar from '@/components/NavBar.vue'
 import FlowerImage from '@/components/FlowerImage.vue'
-import store, { addToCart, removeDiyPlan } from '@/store'
+import store, { removeDiyPlan } from '@/store'
 import { toast } from '@/utils/toast'
+import { listAccountDiyPlans, deleteAccountDiyPlan } from '@/mock/api'
 
 const router = useRouter()
-const plans = store.diyPlans
+const plans = ref([])
 const expanded = ref('')
+const loading = ref(false)
+
+onMounted(async () => {
+  if (!store.isLogged || !store.token) {
+    router.replace({ name: 'login', query: { redirect: '/my-plans' } })
+    return
+  }
+  loading.value = true
+  try {
+    const remote = await listAccountDiyPlans()
+    // 以当前账号的服务端数据为准，避免旧的全局本地缓存串到其他账号。
+    plans.value = remote.map(p => ({
+      id: p.id, name: p.name || 'AI 定制方案', desc: p.desc || '',
+      price: Number(p.priceNum || p.price || p.totalNum || 0), image: p.coverImage || p.image || '',
+      materials: p.mainFlowers || p.materials || [], budget: p.budgetRows || p.budget || [],
+      colorScheme: p.colorScheme || [], packaging: p.packaging || '', meaning: p.meaning || '',
+      steps: p.steps || [], caution: p.caution || '', copyText: p.copyText || '',
+      careTips: p.careTips || '', greeting: p.greeting || '', skillLevel: p.skillLevel || '',
+      suitableFor: p.suitableFor || '', savedAt: p.updatedAt || p.savedAt || Date.now()
+    }))
+  } catch (e) {
+    toast((e && e.message) || '方案同步失败')
+  } finally { loading.value = false }
+})
 
 function isImageUrl(s) {
   return /^https?:\/\//.test(s || '')
@@ -94,31 +119,20 @@ function moneyYuan(v) {
   return n.toFixed(2)
 }
 function fmtTime(ts) {
-  const d = new Date(Number(ts) || Date.now())
+  const d = new Date(ts || Date.now())
   const p = n => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
-function onAdd(p) {
-  // ⚠️ DIY 方案的价格可能是空的（真实价只在 estimated_price 文本里）→ 加购会被拒。
-  //    以前这里无条件提示「已加入购物车」，0 元方案就这样进了车并跳到结算（审计 P0-3）。
-  const ok = addToCart({
-    id: 'diy_' + p.id,
-    name: p.name,
-    subtitle: 'AI 定制方案',
-    // store 里价格以「分」计，DIY 方案存的单位是「元」
-    price: Math.round((Number(p.price) || 0) * 100),
-    image: p.image || '',
-    shopId: 'default',
-    quantity: 1
-  })
-  if (ok) { toast('已加入购物车'); return }
-  toast('该方案暂无报价，无法直接下单，请先咨询商家')
-}
-
-function onRemove(p) {
-  removeDiyPlan(p.id)
-  toast('已删除方案')
+async function onRemove(p) {
+  try {
+    await deleteAccountDiyPlan(p.id)
+    removeDiyPlan(p.id)
+    plans.value = plans.value.filter(item => item.id !== p.id)
+    toast('已删除方案')
+  } catch (e) {
+    toast((e && e.message) || '方案删除失败，请稍后重试')
+  }
 }
 
 function copy(text) {

@@ -247,6 +247,13 @@ export async function submitOrder(orderId) {
     pickupContact: isPickup ? { name: String(row.addr_name || ''), phone: String(row.addr_phone || '') } : undefined,
     remark: String(row.remark || ''),
     cardContent: String(row.card_content || ''),
+    card: (() => {
+      try {
+        const value = typeof row.card_data === 'string' ? JSON.parse(row.card_data) : row.card_data
+        if (value && Array.isArray(value.cards)) return { ...value, cards: value.cards.slice(0, 5) }
+        return value
+      } catch (e) { return null }
+    })(),
     expectDeliveryTime: String(row.expect_delivery || '')
   }
 

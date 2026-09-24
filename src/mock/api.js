@@ -409,6 +409,7 @@ export async function createOrder(payload) {
           pickupName: payload.pickupName || '',
           pickupPhone: payload.pickupPhone || '',
           cardContent: payload.cardContent || '',
+          card: payload.card && typeof payload.card === 'object' ? payload.card : null,
           remark: payload.remark || ''
         }, a.token)
         return { id: d.id, status: d.status || 'new' }
@@ -442,6 +443,55 @@ export async function createOrder(payload) {
   }
   mockData.orders.unshift(order)
   return { id, status: 'pending' }
+}
+
+export async function saveGreeting(payload) {
+  const a = await ensureGuestAuth()
+  if (a.offline || !a.token || a.userInfo?.guest) throw new Error('请先登录后保存贺卡')
+  return realPost('/greetings', payload, a.token)
+}
+
+export async function listSavedGreetings() {
+  const a = await ensureGuestAuth()
+  if (a.offline || !a.token || a.userInfo?.guest) return []
+  const d = await realApi('/greetings', undefined, a.token)
+  return Array.isArray(d) ? d : (d.list || [])
+}
+
+export async function deleteSavedGreeting(id) {
+  const a = await ensureGuestAuth()
+  if (a.offline || !a.token || a.userInfo?.guest) throw new Error('请先登录后删除贺卡')
+  const base = (typeof location !== 'undefined' && location.origin) || ''
+  const res = await fetch(new URL('/api/greetings/' + encodeURIComponent(id), base), {
+    method: 'DELETE', headers: { Accept: 'application/json', ...authHeaders(a.token) }
+  })
+  if (!res.ok) throw await agentHttpError(res, 'delete greeting')
+  return res.json()
+}
+
+export async function saveAccountDiyPlan(payload) {
+  const a = await ensureGuestAuth()
+  if (a.offline || !a.token || a.userInfo?.guest) throw new Error('请先登录后保存方案')
+  return realPost('/diy-plans', payload, a.token)
+}
+
+export async function listAccountDiyPlans() {
+  const a = await ensureGuestAuth()
+  if (a.offline || !a.token || a.userInfo?.guest) return []
+  const d = await realApi('/diy-plans', undefined, a.token)
+  return Array.isArray(d) ? d : (d.list || [])
+}
+
+export async function deleteAccountDiyPlan(id) {
+  const a = await ensureGuestAuth()
+  if (a.offline || !a.token || a.userInfo?.guest) throw new Error('请先登录后删除方案')
+  const path = '/diy-plans/' + encodeURIComponent(id)
+  const base = (typeof location !== 'undefined' && location.origin) || ''
+  const res = await fetch(new URL('/api' + path, base), {
+    method: 'DELETE', headers: { Accept: 'application/json', ...authHeaders(a.token) }
+  })
+  if (!res.ok) throw await agentHttpError(res, 'delete diy plan')
+  return res.json()
 }
 
 /** 取消订单（仅待付款可取消；真实后端落库） */
@@ -1188,6 +1238,26 @@ async function greetingRequest(endpoint, payload, signal) {
 export const draftGreeting = (payload, signal) => greetingRequest('draft', payload, signal)
 export const renderGreeting = (payload, signal) => greetingRequest('render', payload, signal)
 
+/** 语音接口与对话共用身份；FormData 的 boundary 交给浏览器生成。 */
+export async function advisorSpeech(kind, payload, signal) {
+  const token = await ensureAgentToken()
+  if (!agentUserId) throw new Error('未取得语音用户身份')
+  const headers = { Authorization: `Bearer ${token}` }
+  let path = '/speech/tts'
+  let body
+  if (kind === 'transcribe') {
+    path = '/speech/transcribe?user_id=' + encodeURIComponent(agentUserId)
+    body = new FormData()
+    body.append('file', payload, payload.name || 'recording.webm')
+  } else {
+    headers['Content-Type'] = 'application/json'
+    body = JSON.stringify({ user_id: agentUserId, text: payload })
+  }
+  const res = await fetch(AGENT_CONFIG.apiBase + path, { method: 'POST', headers, body, signal })
+  if (!res.ok) throw await agentHttpError(res, '语音服务')
+  return res.json()
+}
+
 /** 当前账号在智能体平台的会话列表（新→旧） */
 export async function listAgentConversations() {
   if (!AGENT_CONFIG.ready) return []
@@ -1223,6 +1293,20 @@ export async function fetchAgentMessages(conversationId, limit = 100) {
     .filter(m => m.text)
 }
 
+/** 删除当前账号在智能体平台上的会话及其历史消息。 */
+export async function deleteAgentConversation(conversationId) {
+  if (!AGENT_CONFIG.ready || !conversationId) return { ok: true, localOnly: true }
+  const tok = await ensureAgentToken()
+  if (!agentUserId) throw new Error('未取得智能体用户身份')
+  const res = await fetch(AGENT_CONFIG.apiBase + '/conversations/' + encodeURIComponent(conversationId) +
+    '?user_id=' + encodeURIComponent(agentUserId), {
+      method: 'DELETE',
+      headers: { Accept: 'application/json', Authorization: `Bearer ${tok}`, ...agentKeyHeader() }
+    })
+  if (!res.ok) throw await agentHttpError(res, 'delete conversation')
+  return res.json()
+}
+
 // 从方案对象里解析价格（兼容 元/分 多字段）
 function parseAgentPrice(obj) {
   if (!obj || typeof obj !== 'object') return 0
@@ -1243,13 +1327,12 @@ function normalizeAdvisorResponse(r, sessionId) {
     return { reply: '', ui: 'text', options: [], plans: [], shops: [], poll: null, sessionId }
   }
   const ui = r.ui || (r.action && r.action.type) || 'text'
-  const payload = (r.action && r.action.payload) || r
+  const payload = (r.action && r.action.payload) || r.data || r
   const options = payload.options || r.options || []
-  let plans = payload.plans || r.plans || []
+  let plans = Array.isArray(payload.plans || r.plans) ? (payload.plans || r.plans).slice() : []
   const shops = payload.shops || r.shops || []
-  const poll = r.data && r.data.poll
-    ? (String(r.data.poll).startsWith('http') ? r.data.poll : AGENT_CONFIG.apiBase + r.data.poll)
-    : null
+  const poll = typeof payload.poll === 'string' ? payload.poll
+    : payload.task_id ? '/tasks/' + payload.task_id : null
 
   // 没 plan_card 时，从 tool_calls 的 DIY 方案结果里提取
   if (!plans.length && Array.isArray(r.tool_calls)) {
@@ -1274,13 +1357,15 @@ function normalizeAdvisorResponse(r, sessionId) {
 
   return {
     reply: r.reply || payload.reply || '',
+    speechText: String(r.speech_text || ''),
     ui,
+    cards: r.data && ui !== 'text' ? [{ ui, data: r.data }] : [],
     options: Array.isArray(options) ? options.map(o => ({ label: o.label, value: o.value })) : [],
     plans: plans.map(p => ({
       id: String(p.plan_id || p.name),
       name: p.name,
       price: p.price,
-      priceText: p.price ? p.price.toFixed(2) : '到店咨询',
+      priceText: Number(p.price) > 0 ? Number(p.price).toFixed(2) : '到店咨询',
       desc: p.desc || '',
       image: p.image || '',
       shopId: p.shopId || 'default'
@@ -1467,15 +1552,15 @@ export async function pollAgentTask(pollUrl, cb = {}) {
   if (!pollUrl) return null
   // ⚠️ 平台给的是相对路径（/tasks/xxx），必须经 apiBase（/agent）转发以便注入 X-API-Key；
   //    直接 fetch 会打到前端自己的域名上 → 永远 404，效果图也就永远出不来。
-  const url = String(pollUrl).startsWith('http') ? String(pollUrl) : (AGENT_CONFIG.apiBase + pollUrl)
+  const url = normalizeAgentAssetUrl(pollUrl)
   // ⚠️ /tasks/{id} 需要 **Bearer 登录凭证**（实测只带 X-API-Key 会 401「需要 Bearer 登录凭证」）
   let token = ''
   try { token = await ensureAgentToken() } catch (e) { return null }
   const ctrl = new AbortController()
-  const timer = setTimeout(() => ctrl.abort(), 150000)
+  const timer = setTimeout(() => ctrl.abort(), 310000)
   try {
     // 生图通常十几秒，慢时会更久 —— 对齐官方 demo（45 次 × 3.5s），避免"等不到图就放弃"
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 86; i++) {
       let d = null
       try {
         const res = await fetch(url, {
@@ -1486,7 +1571,14 @@ export async function pollAgentTask(pollUrl, cb = {}) {
           },
           signal: ctrl.signal
         })
-        if (!res.ok) break
+        if (res.status === 429 || res.status >= 500) {
+          await new Promise(r => setTimeout(r, 3500))
+          continue
+        }
+        if (!res.ok) {
+          if (onStatus) onStatus('failed', '效果图查询失败（' + res.status + '），请稍后重试')
+          break
+        }
         d = await res.json()
       } catch (e) { break }
       if (!d || typeof d !== 'object') break

@@ -126,6 +126,13 @@ function toFront(o, items = []) {
     expectDeliveryTime: o.expect_delivery || '',
     pickupMethod: o.pickup_method || 'delivery',
     cardContent: o.card_content || '',
+    card: (() => {
+      try {
+        const value = typeof o.card_data === 'string' ? JSON.parse(o.card_data) : o.card_data
+        if (value && Array.isArray(value.cards)) return { ...value, cards: value.cards.slice(0, 5) }
+        return value
+      } catch (e) { return null }
+    })(),
     remark: o.remark || '',
     payTime: o.pay_time || '',
     address: {
@@ -193,6 +200,14 @@ router.post('/', async (req, res) => {
   const items = Array.isArray(b.items) ? b.items : []
   if (!shopId) return res.status(400).json({ error: 'missing shopId' })
   if (!items.length) return res.status(400).json({ error: 'missing items' })
+  if (b.card) {
+    const cards = b.card.cards
+    if (!Array.isArray(cards) || cards.length > 5) return res.status(400).json({ error: '每笔订单最多 5 张贺卡' })
+    const itemIds = new Set(items.map(it => String(it?.id || it?.product_id || '')))
+    if (cards.some(card => !card || typeof card.text !== 'string' || !card.text.trim() || card.text.length > 600 || !itemIds.has(String(card.itemId || '')))) {
+      return res.status(400).json({ error: '贺卡正文或绑定商品无效' })
+    }
+  }
   const cleanItems = []
   for (const it of items) {
     const id = String((it && (it.id || it.product_id)) || '').trim()
@@ -255,8 +270,8 @@ router.post('/', async (req, res) => {
         `INSERT INTO orders
           (id, user_id, shop_id, shop_name, status, item_total, delivery_fee, total_price,
            addr_name, addr_phone, addr_region, addr_detail, expect_delivery, pickup_method,
-           card_content, remark)
-         VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           card_content, card_data, remark)
+         VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           orderNo, userId, shopId, String(b.shopName || '').slice(0, 64),
           itemTotal, deliveryFee, totalPrice,
@@ -265,9 +280,10 @@ router.post('/', async (req, res) => {
           String(addr.region || '').slice(0, 128),
           pickupMethod === 'pickup' ? '到店自取' : String(addr.detail || '').slice(0, 255),
           String(b.expectDeliveryTime || '').slice(0, 64),
-          pickupMethod,
-          String(b.cardContent || '').slice(0, 500),
-          String(b.remark || '').slice(0, 255)
+           pickupMethod,
+           String(b.cardContent || '').slice(0, 500),
+           b.card && typeof b.card === 'object' ? JSON.stringify(b.card) : null,
+           String(b.remark || '').slice(0, 255)
         ]
       )
       for (const it of cleanItems) {

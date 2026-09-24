@@ -14,6 +14,8 @@ import { startProfitSharingScanner } from './profitsharing.js'
 import { startMerchantBridgeScanner, merchantBridgeInfo } from './merchantBridge.js'
 import ordersRouter, { reconcileRefundReviews, refundReviewInfo } from './orders.js'
 import authRouter from './auth.js'
+import greetingsRouter from './greetings.js'
+import diyPlansRouter from './diyPlans.js'
 
 const app = express()
 app.use(cors())
@@ -516,6 +518,8 @@ app.post('/api/pay/notify', express.raw({ type: 'application/json' }), async (re
 // ---------- H5 业务：订单读写 + 用户身份（h5_shop 库） ----------
 app.use('/api/orders', ordersRouter)
 app.use('/api/auth', authRouter)
+app.use('/api/greetings', greetingsRouter)
+app.use('/api/diy-plans', diyPlansRouter)
 
 const PORT = Number(process.env.API_PORT || 4000)
 app.listen(PORT, () => {

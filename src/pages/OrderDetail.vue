@@ -150,6 +150,20 @@
           <span class="info-label">💌 贺卡</span>
           <span class="info-value card-content">{{ order.cardContent }}</span>
         </div>
+        <template v-if="order.card && order.card.cards && order.card.cards.length">
+          <div v-for="(card, index) in order.card.cards" :key="card.localId || index" class="info-row card-image-row">
+            <span class="info-label">贺卡 {{ index + 1 }}</span>
+            <div>
+              <span v-if="card.text" class="info-value card-content">{{ card.text }}</span>
+              <img v-if="card.image_url" class="order-card-image" :src="card.image_url" alt="贺卡预览" />
+              <small v-if="card.itemId" class="card-item-bind">对应商品：{{ card.itemId }}</small>
+            </div>
+          </div>
+        </template>
+        <div v-else-if="order.card && order.card.image_url" class="info-row card-image-row">
+          <span class="info-label">贺卡预览</span>
+          <img class="order-card-image" :src="order.card.image_url" alt="贺卡预览" />
+        </div>
         <div v-if="order._canRefund" class="info-row aftersale-entry" @click="showRefund = true">
           <span class="info-label">售后服务</span>
           <div class="aftersale-entry-value">
@@ -516,6 +530,20 @@ onMounted(async () => {
 .refund-amount {
   color: #E8615D;
   font-weight: 600;
+}
+.order-card-image {
+  display: block;
+  width: rpx(180);
+  max-height: rpx(240);
+  object-fit: cover;
+  border-radius: rpx(8);
+  margin-top: rpx(10);
+}
+.card-item-bind {
+  display: block;
+  margin-top: rpx(8);
+  color: #8A9099;
+  font-size: var(--fs-caption);
 }
 .aftersale-entry {
   margin-top: rpx(4);

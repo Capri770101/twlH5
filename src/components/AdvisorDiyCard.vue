@@ -14,7 +14,7 @@
       <div v-else class="diy-cover-ph">
         <div v-if="pending && !imgBroken" class="shimmer"></div>
         <span class="ph-emoji" v-if="!pending || imgBroken">💐</span>
-        <span class="ph-text">{{ imgBroken ? '效果图加载失败' : (pending ? '效果图生成中…' : '尚未生成效果图') }}</span>
+        <span class="ph-text">{{ imgBroken ? '效果图加载失败' : props.imageStatus === 'failed' ? '效果图生成失败，请重新请求' : (pending ? '效果图生成中…' : '尚未生成效果图') }}</span>
         <span v-if="!pending && !imgBroken" class="ph-hint">点下方「生成效果图」</span>
       </div>
       <span v-if="cover" class="cover-cap">效果图 · AI 生成</span>
@@ -139,14 +139,12 @@
         >换个配色</button>
         <button class="act" @click="$emit('save', d)">保存到我的方案</button>
       </div>
-      <GreetingEditor :plan="plan" />
     </div>
   </div>
 </template>
 
 <script setup>
 import { computed, ref } from 'vue'
-import GreetingEditor from '@/components/GreetingEditor.vue'
 import { AGENT_CONFIG } from '@/mock/api'
 import { normalizeAgentAssetUrl } from '@/utils/agentAsset'
 import { normalizeDiyPlan, hexOfColor } from '@/utils/diyPlan'
@@ -187,7 +185,7 @@ const cover = computed(() => {
 })
 
 /** 是否处于「正在等效果图」状态 —— 决定封面显示 shimmer + 「生成中…」 */
-const pending = computed(() => !cover.value && (d.value.hasTask || props.imageStatus === 'processing'))
+const pending = computed(() => !imgBroken.value && !cover.value && !['failed', 'done'].includes(props.imageStatus) && (d.value.hasTask || props.imageStatus === 'processing'))
 
 /* ── 复制 ── */
 const copyHint = ref('')

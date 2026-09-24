@@ -20,26 +20,24 @@ export default defineConfig({
   },
   server: {
     port: 5180,
-    // 开发代理：H5 走同源 /agent/* 由 Vite 转发到 api.tiaowulan.com（绕开浏览器 CORS）
-    // 🔐 X-API-Key 由本代理注入，取自 shell 环境变量 AGENT_API_KEY ——
-    //    刻意不用 VITE_* 前缀（那个会被打进前端 bundle，等于公开密钥）。
-    //    本地联调：AGENT_API_KEY=xxx npm run dev
+    // 默认借用线上 H5 网关：保留 /agent 前缀，由网关注入平台 Key。
+    // 本地直连智能体：设置 AGENT_PROXY_TARGET=http://127.0.0.1:8000
+    // 和 AGENT_API_KEY；Key 仅留在开发服务器，不使用 VITE_* 暴露到前端。
     proxy: {
       '/agent': {
-        target: 'https://api.tiaowulan.com',
+        target: process.env.AGENT_PROXY_TARGET || 'http://129.204.85.139',
         changeOrigin: true,
         secure: true,
-        rewrite: p => p.replace(/^\/agent/, ''),
+        rewrite: p => process.env.AGENT_PROXY_TARGET ? p.replace(/^\/agent/, '') : p,
         configure(proxy) {
           const key = process.env.AGENT_API_KEY || ''
           if (!key) return
           proxy.on('proxyReq', proxyReq => proxyReq.setHeader('X-API-Key', key))
         }
       },
-      // 本地 Node 后端（MySQL 只读库代理）：/api/* 转发到 http://localhost:4000
-      // 生产可由同源反向代理或把后端部署到同源路径下，避免浏览器跨域
+      // 默认使用线上业务接口；开发本地后端时设置 API_PROXY_TARGET=http://localhost:4000。
       '/api': {
-        target: process.env.API_PROXY_TARGET || 'http://localhost:4000',
+        target: process.env.API_PROXY_TARGET || 'http://129.204.85.139',
         changeOrigin: true,
         secure: false
       }

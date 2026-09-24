@@ -62,14 +62,14 @@ export async function resolveUser(req) {
   const payload = verifyToken(token)
   if (payload && payload.uid) {
     const rows = await hq(
-      'SELECT id, openid, guest_id, phone, nickname, avatar FROM users WHERE id = ? LIMIT 1',
+      'SELECT id, openid, guest_id, phone, username, nickname, avatar FROM users WHERE id = ? LIMIT 1',
       [payload.uid]
     )
     return rows.length ? rows[0] : null
   }
   try {
     const rows = await hq(
-      'SELECT id, openid, guest_id, phone, nickname, avatar FROM users WHERE guest_id = ? OR openid = ? LIMIT 1',
+      'SELECT id, openid, guest_id, phone, username, nickname, avatar FROM users WHERE guest_id = ? OR openid = ? LIMIT 1',
       [token, token]
     )
     return rows.length ? rows[0] : null

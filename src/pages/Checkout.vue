@@ -119,35 +119,51 @@
 
       <div v-if="needCard">
         <div class="card-type-row">
-          <div
-            class="card-type-btn"
-            :class="{ active: cardType === 'blank' }"
-            @click="cardType = 'blank'"
-          >空白贺卡</div>
-          <div
-            class="card-type-btn"
-            :class="{ active: cardType === 'write' }"
-            @click="cardType = 'write'"
-          >商家代写</div>
+          <div class="card-type-btn active">AI 贺卡</div>
         </div>
 
-        <div v-if="cardFinalContent" class="card-final-preview">
-          <div class="card-final-header">
-            <span class="card-final-title">贺卡内容</span>
-            <span class="card-final-edit" @click="showCardWrite = true">修改</span>
+        <div class="saved-greetings">
+          <GreetingEditor
+            :plan="{}"
+            :default-open="false"
+            summary-text="现场生成一张 AI 贺卡"
+            @ready="onGreetingReady"
+          />
+          <img v-if="cardImageUrl" class="selected-greeting-image" :src="cardImageUrl" alt="所选贺卡预览" />
+          <div v-if="savedGreetings.length" class="saved-greeting-list">
+            <div
+              v-for="g in savedGreetings"
+              :key="g.id"
+              class="saved-greeting"
+              :class="{ active: selectedGreetingId === g.id }"
+            >
+              <button type="button" class="greeting-body" @click="useGreeting(g)">
+                <img v-if="g.imageUrl" :src="g.imageUrl" alt="" />
+                <span>{{ g.text }}</span>
+              </button>
+              <button type="button" class="greeting-delete" @click="deleteGreeting(g)">✕</button>
+            </div>
           </div>
-          <div class="card-final-body">
-            <span class="card-final-text">{{ cardFinalContent }}</span>
-          </div>
-        </div>
-        <div v-else-if="cardType === 'write'" class="card-write-entry" @click="showCardWrite = true">
-          <span>写下你的祝福语 ›</span>
+          <div v-else class="saved-greeting-empty">在上方生成一张 AI 贺卡，或登录后选择已保存的贺卡。</div>
         </div>
 
-        <div v-if="cardType === 'write'" class="card-phone-row">
-          <span class="card-phone-label">您的电话<span class="card-help-icon">?</span></span>
-          <span class="card-phone-area">+86 ▼</span>
-          <input v-model="cardPhone" class="card-phone-input" placeholder="请输入手机号" type="tel" maxlength="11" />
+        <div class="order-card-list">
+          <div v-for="(card, index) in cardDrafts" :key="card.localId" class="order-card-item">
+            <div class="order-card-item-head">
+              <b>贺卡 {{ index + 1 }}</b>
+              <button type="button" class="card-remove" @click="removeCardDraft(index)">删除</button>
+            </div>
+            <div class="order-card-bind">
+              <span>对应商品</span>
+              <select v-model="card.itemId">
+                <option v-for="item in checkoutItems" :key="item.id" :value="item.id">{{ item.name }}</option>
+              </select>
+            </div>
+            <img v-if="card.image_url" class="order-card-thumb" :src="card.image_url" alt="贺卡预览" />
+            <div class="order-card-summary">{{ card.text || '（无正文）' }}</div>
+          </div>
+          <button v-if="cardDrafts.length < 5" type="button" class="add-card-btn" @click="addCurrentCard">＋ 添加当前贺卡</button>
+          <p class="card-limit-tip">每笔订单最多 5 张贺卡，可删除或重新调整对应商品。</p>
         </div>
       </div>
     </div>
@@ -235,63 +251,6 @@
       </div>
     </div>
 
-    <!-- 贺卡代写弹窗 -->
-    <div v-if="showCardWrite" class="modal-mask" @click="showCardWrite = false"></div>
-    <div v-if="showCardWrite" class="modal-content modal-card-write">
-      <div class="modal-header">
-        <span class="modal-title">填写祝福语</span>
-        <span class="modal-close" @click="showCardWrite = false">✕</span>
-      </div>
-
-      <div class="card-paper">
-        <div v-if="cardMessage.length" class="card-clear-area">
-          <span class="card-clear-btn" @click="cardMessage = ''">清空</span>
-        </div>
-        <input v-model="cardTargetName" class="card-nickname-input" placeholder="TA的昵称（选填）" />
-        <textarea
-          v-model="cardMessage"
-          class="card-textarea"
-          maxlength="50"
-          placeholder="请写下祝福语，如未填写，灰色文字和虚线不会打印在贺卡上"
-        ></textarea>
-        <div class="card-char-count">{{ cardMessage.length }}/50</div>
-        <input v-model="cardMyName" class="card-myname-input" placeholder="您的昵称（选填）" />
-      </div>
-
-      <div class="card-scene-scroll hide-scrollbar">
-        <span
-          v-for="s in cardSceneTags"
-          :key="s"
-          class="card-scene-tag"
-          :class="{ active: cardScene === s }"
-          @click="cardScene = s"
-        >{{ s }}</span>
-      </div>
-
-      <div class="card-suggestion-head">
-        <span class="card-suggestion-title">祝福语灵感</span>
-        <span class="card-refresh-btn" @click="refreshSuggestions">换一批</span>
-      </div>
-      <div class="card-ai-list">
-        <div
-          v-for="item in aiSuggestions"
-          :key="item"
-          class="card-ai-item"
-          :class="{ selected: cardMessage === item }"
-          @click="cardMessage = item"
-        >
-          <span class="card-ai-label">真诚</span>
-          <span class="card-ai-text">{{ item }}</span>
-        </div>
-      </div>
-
-      <div class="picker-footer">
-        <button class="btn btn-primary btn-lg" :class="{ 'btn-disabled': !cardMessage }" @click="confirmCard">
-          确认并提交
-        </button>
-      </div>
-    </div>
-
   </div>
   <AddressManager v-model="showAddr" />
 
@@ -312,9 +271,10 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onUnmounted } from 'vue'
+import { ref, reactive, computed, onUnmounted, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { createOrder, getDeliveryDates, payOrder } from '@/mock/api'
+import { createOrder, getDeliveryDates, payOrder, listSavedGreetings, deleteSavedGreeting } from '@/mock/api'
+import GreetingEditor from '@/components/GreetingEditor.vue'
 import {
   groupedCart,
   totalPrice as cartTotal,
@@ -397,13 +357,17 @@ const deliveryTime = ref('')
 const pickupTime = ref('')
 
 const needCard = ref(false)
-const cardType = ref('blank')
 const cardMessage = ref('')
 const cardTargetName = ref('')
 const cardMyName = ref('')
-const cardPhone = ref('')
 const cardScene = ref('')
-const showCardWrite = ref(false)
+const cardImageUrl = ref('')
+const cardTemplate = ref('')
+const savedGreetings = ref([])
+const selectedGreetingId = ref('')
+let renderedGreeting = null
+const cardDrafts = ref([])
+const checkoutItems = computed(() => groupedCart.value.flatMap(g => g.items))
 
 const remark = ref('')
 const submitting = ref(false)
@@ -446,18 +410,113 @@ const cardFinalContent = computed(() => {
   return to + cardMessage.value + from
 })
 
-const cardSceneTags = ['生日', '表白', '感谢', '道歉', '祝福', '探望']
-const suggestionPool = [
-  ['愿这束花替我说出想说的话', '谢谢你一直在我身边', '愿你的每一天都像花儿一样灿烂'],
-  ['所有的美好都如期而至', '想把春天送给你', '你值得这世间所有的温柔'],
-  ['见花如见人，愿你欢喜', '花开正好，恰如初见', '愿生活对你温柔以待']
-]
-const aiSuggestions = ref(suggestionPool[0])
-let suggestIdx = 0
-function refreshSuggestions() {
-  suggestIdx = (suggestIdx + 1) % suggestionPool.length
-  aiSuggestions.value = suggestionPool[suggestIdx]
+try {
+  const pending = JSON.parse(sessionStorage.getItem('twd_pending_greeting') || 'null')
+  if (pending && pending.text) {
+    needCard.value = true
+    cardMessage.value = String(pending.text || '')
+    cardTargetName.value = String(pending.recipient || '')
+    cardMyName.value = String(pending.sender || '')
+    cardScene.value = String(pending.occasion || '')
+    cardImageUrl.value = String(pending.imageUrl || '')
+    cardTemplate.value = String(pending.template || '')
+    renderedGreeting = { text: cardMessage.value, recipient: cardTargetName.value, sender: cardMyName.value, occasion: cardScene.value }
+    sessionStorage.removeItem('twd_pending_greeting')
+  }
+} catch (e) { /* ignore malformed pending greeting */ }
+
+function useGreeting(g) {
+  if (!g) return
+  selectedGreetingId.value = g.id || ''
+  cardMessage.value = g.text || ''
+  cardTargetName.value = g.recipient || ''
+  cardMyName.value = g.sender || ''
+  cardScene.value = g.occasion || ''
+  cardImageUrl.value = g.imageUrl || ''
+  cardTemplate.value = g.template || ''
+  renderedGreeting = { text: cardMessage.value, recipient: cardTargetName.value, sender: cardMyName.value, occasion: cardScene.value }
 }
+
+// 结算页内嵌编辑器「使用这张贺卡」→ 直接填进当前贺卡，无需跳回对话页
+function onGreetingReady(g) {
+  if (!g) return
+  needCard.value = true
+  selectedGreetingId.value = ''
+  cardMessage.value = g.text || ''
+  cardTargetName.value = g.recipient || ''
+  cardMyName.value = g.sender || ''
+  cardScene.value = g.occasion || ''
+  cardImageUrl.value = g.imageUrl || ''
+  cardTemplate.value = g.template || ''
+  renderedGreeting = { text: cardMessage.value, recipient: cardTargetName.value, sender: cardMyName.value, occasion: cardScene.value }
+}
+
+async function deleteGreeting(g) {
+  if (!g || !g.id) return
+  try {
+    await deleteSavedGreeting(g.id)
+    savedGreetings.value = savedGreetings.value.filter(x => x.id !== g.id)
+    if (selectedGreetingId.value === g.id) {
+      selectedGreetingId.value = ''
+      cardImageUrl.value = ''
+    }
+    toast('已删除贺卡')
+  } catch (e) {
+    toast((e && e.message) || '删除失败，请稍后重试')
+  }
+}
+
+function currentCardSnapshot() {
+  return {
+    localId: 'card_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    enabled: true,
+    type: 'ai_generated',
+    text: cardFinalContent.value,
+    image_url: cardImageUrl.value,
+    template: cardTemplate.value,
+    recipient: cardTargetName.value,
+    sender: cardMyName.value,
+    occasion: cardScene.value,
+    itemId: checkoutItems.value[0]?.id || ''
+  }
+}
+
+function addCurrentCard() {
+  if (cardDrafts.value.length >= 5) { toast('每笔订单最多 5 张贺卡'); return }
+  const card = currentCardSnapshot()
+  if (!card.image_url) { toast('请先生成或选择一张 AI 贺卡'); return }
+  if (cardDrafts.value.some(x => x.text === card.text && x.image_url === card.image_url)) {
+    toast('这张贺卡已经添加')
+    return
+  }
+  cardDrafts.value.push(card)
+  toast('贺卡已加入订单')
+}
+
+function removeCardDraft(index) {
+  cardDrafts.value.splice(index, 1)
+  if (!cardDrafts.value.length) needCard.value = false
+}
+
+watch([cardMessage, cardTargetName, cardMyName, cardScene], () => {
+  if (renderedGreeting && (
+    cardMessage.value !== renderedGreeting.text || cardTargetName.value !== renderedGreeting.recipient ||
+    cardMyName.value !== renderedGreeting.sender || cardScene.value !== renderedGreeting.occasion
+  )) {
+    cardImageUrl.value = ''
+    selectedGreetingId.value = ''
+    renderedGreeting = null
+  }
+})
+
+onMounted(async () => {
+  if (!store.isLogged) return
+  try {
+    savedGreetings.value = await listSavedGreetings()
+  } catch (e) {
+    console.warn('[checkout] 贺卡读取失败：', e && e.message)
+  }
+})
 
 function openTime(kind) {
   timeKind.value = kind
@@ -473,11 +532,6 @@ function confirmTime() {
   if (timeKind.value === 'delivery') deliveryTime.value = pendingTime.value
   else pickupTime.value = pendingTime.value
   showTime.value = false
-}
-
-function confirmCard() {
-  if (!cardMessage.value) return
-  showCardWrite.value = false
 }
 
 async function onSubmit() {
@@ -505,7 +559,15 @@ async function onSubmit() {
       pickupMethod: pickupMethod.value,
       pickupName: pickupContactName.value,
       pickupPhone: pickupContactPhone.value,
-      cardContent: cardFinalContent.value,
+      cardContent: needCard.value
+        ? (cardDrafts.value[0]?.text || cardFinalContent.value)
+        : '',
+      card: (() => {
+        const cards = needCard.value
+          ? (cardDrafts.value.length ? cardDrafts.value : [currentCardSnapshot()])
+          : []
+        return cards.length ? { enabled: true, cards: cards.slice(0, 5) } : null
+      })(),
       remark: remark.value
     })
     const outTradeNo = res.id
@@ -899,92 +961,6 @@ async function onSubmit() {
   background: #fffaf5;
   font-weight: 500;
 }
-.card-write-entry {
-  margin-top: rpx(20);
-  padding: rpx(24);
-  border: rpx(1) dashed #e3d5cc;
-  border-radius: rpx(12);
-  text-align: center;
-  color: var(--primary);
-  font-size: rpx(26);
-}
-.card-phone-row {
-  display: flex;
-  align-items: center;
-  gap: rpx(16);
-  margin-top: rpx(20);
-  padding-top: rpx(16);
-  border-top: rpx(1) solid #f5f5f5;
-}
-.card-phone-label {
-  font-size: var(--fs-body);
-  color: var(--text-primary);
-  white-space: nowrap;
-}
-.card-help-icon {
-  display: inline-block;
-  width: rpx(32);
-  height: rpx(32);
-  line-height: rpx(30);
-  text-align: center;
-  border: rpx(1) solid #ccc;
-  border-radius: 50%;
-  font-size: var(--fs-label);
-  color: #999;
-  margin-left: rpx(4);
-  vertical-align: middle;
-}
-.card-phone-area {
-  font-size: var(--fs-minor);
-  color: #666;
-  white-space: nowrap;
-}
-.card-phone-input {
-  flex: 1;
-  min-width: 0;
-  font-size: var(--fs-body);
-  text-align: right;
-  border: none;
-  background: transparent;
-  outline: none;
-}
-.card-final-preview {
-  margin-top: rpx(20);
-  border-radius: rpx(12);
-  overflow: hidden;
-  border: rpx(1) solid #f0e6e0;
-}
-.card-final-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: rpx(16) rpx(20);
-  background: #fdf8f4;
-  border-bottom: rpx(1) solid #f0e6e0;
-}
-.card-final-title {
-  font-size: var(--fs-body);
-  color: var(--primary);
-  font-weight: 500;
-}
-.card-final-edit {
-  font-size: var(--fs-minor);
-  color: var(--primary);
-  border: rpx(1) solid var(--primary);
-  border-radius: rpx(6);
-  padding: rpx(4) rpx(16);
-}
-.card-final-body {
-  background: linear-gradient(135deg, #fef9f5 0%, #fef6f0 50%, #fdf2f7 100%);
-  padding: rpx(28) rpx(24);
-}
-.card-final-text {
-  font-size: rpx(28);
-  color: #333;
-  line-height: 1.8;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
 
 /* 备注 */
 .remark-row {
@@ -1161,151 +1137,6 @@ async function onSubmit() {
 }
 .picker-scroll-spacer {
   height: rpx(32);
-}
-
-/* 贺卡弹窗 */
-.modal-card-write {
-  left: 50%;
-  transform: translateX(-50%);
-  width: 1rem;
-  max-height: 85vh;
-  display: flex;
-  flex-direction: column;
-}
-.card-paper {
-  margin: 0 rpx(24);
-  padding: rpx(28) rpx(24) rpx(8);
-  background: linear-gradient(135deg, #fef6f0 0%, #fdf2f7 40%, #f5ecfa 100%);
-  border-radius: rpx(20);
-  border: rpx(1) solid rgba(255, 182, 193, 0.3);
-  position: relative;
-  box-shadow: 0 rpx(4) rpx(20) rgba(255, 150, 180, 0.08);
-}
-.card-clear-area {
-  position: absolute;
-  top: rpx(8);
-  right: rpx(8);
-  z-index: 10;
-  padding: rpx(12);
-}
-.card-clear-btn {
-  padding: rpx(4) rpx(16);
-  font-size: var(--fs-caption);
-  color: #999;
-  border: rpx(1) solid #ddd;
-  border-radius: rpx(8);
-  height: rpx(40);
-  line-height: rpx(40);
-  text-align: center;
-}
-.card-nickname-input {
-  width: 100%;
-  padding: rpx(4) rpx(12);
-  font-size: var(--fs-body);
-  color: #333;
-  border: none;
-  background: transparent;
-  outline: none;
-}
-.card-textarea {
-  width: 100%;
-  min-height: rpx(160);
-  padding: rpx(16) rpx(12);
-  margin-top: rpx(8);
-  font-size: rpx(28);
-  line-height: 1.7;
-  box-sizing: border-box;
-  border: none;
-  background: transparent;
-  outline: none;
-  resize: none;
-  font-family: inherit;
-}
-.card-myname-input {
-  width: 100%;
-  padding: rpx(4) rpx(12);
-  font-size: var(--fs-body);
-  color: #333;
-  border: none;
-  background: transparent;
-  text-align: right;
-  margin-top: rpx(4);
-  outline: none;
-}
-.card-char-count {
-  text-align: right;
-  padding: rpx(4) rpx(12) rpx(8);
-  font-size: var(--fs-caption);
-  color: #bbb;
-}
-.card-scene-scroll {
-  white-space: nowrap;
-  overflow-x: auto;
-  padding: rpx(8) 0 rpx(12);
-  margin: rpx(4) rpx(24) 0;
-}
-.card-scene-tag {
-  display: inline-block;
-  padding: rpx(10) rpx(28);
-  margin-right: rpx(16);
-  border-radius: rpx(30);
-  font-size: var(--fs-body);
-  color: #666;
-  border: rpx(2) solid #eee;
-}
-.card-scene-tag.active {
-  border-color: var(--primary);
-  color: var(--primary);
-  background: #fffaf5;
-}
-.card-suggestion-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: rpx(10) rpx(24) rpx(2);
-}
-.card-suggestion-title {
-  font-size: var(--fs-minor);
-  color: #8b7f78;
-}
-.card-refresh-btn {
-  padding: rpx(8) rpx(18);
-  border-radius: rpx(999);
-  font-size: var(--fs-minor);
-  line-height: 1.4;
-  color: var(--primary);
-  background: #fff5f3;
-  border: rpx(1) solid rgba(239, 98, 98, 0.22);
-}
-.card-ai-list {
-  margin: rpx(8) rpx(24) 0;
-  max-height: rpx(300);
-  overflow-y: auto;
-}
-.card-ai-item {
-  display: flex;
-  align-items: flex-start;
-  gap: rpx(12);
-  padding: rpx(20) 0;
-  border-bottom: rpx(1) solid #f5f5f5;
-}
-.card-ai-label {
-  flex-shrink: 0;
-  padding: rpx(2) rpx(12);
-  font-size: var(--fs-caption);
-  color: var(--primary);
-  border: rpx(1) solid var(--primary);
-  border-radius: rpx(6);
-  line-height: 1.5;
-}
-.card-ai-text {
-  flex: 1;
-  font-size: var(--fs-body);
-  color: #333;
-  line-height: 1.6;
-}
-.card-ai-item.selected {
-  background: #fff8f0;
 }
 
 </style>

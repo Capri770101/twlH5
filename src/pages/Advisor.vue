@@ -125,6 +125,12 @@
             <div class="who">花艺小助手</div>
 
             <div v-if="m.text" class="say">{{ m.text }}<span v-if="m.streaming" class="caret"></span></div>
+            <button v-if="(m.speechText || m.text) && !m.streaming" class="speech-reply"
+              :aria-pressed="playingMessage === m" @click="toggleReply(m)">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4V5Z M15 8a6 6 0 0 1 0 8 M18 5a10 10 0 0 1 0 14" /></svg>
+              {{ playingMessage === m ? (playbackState === 'loading' ? '合成中 · 点击取消' : playbackState === 'ready' ? '点击播放' : '停止播放') : '听语音引导' }}
+              <small>AI 语音</small>
+            </button>
 
             <!-- AI 生成内容标识（《人工智能生成合成内容标识办法》/ GB 45438-2025，平台随 done 下发）-->
             <div v-if="m.role !== 'user' && m.aiGenerated" class="aigc-tag">
@@ -252,13 +258,36 @@
 
     <!-- 输入区 -->
     <footer class="composer">
+      <div class="speech-setting">
+        <span>自动语音播报 <small>{{ autoSpeak ? '新回复自动朗读' : '已关闭' }}</small></span>
+        <button class="speech-switch" role="switch" aria-label="自动语音播报"
+          :aria-checked="autoSpeak" @click="setAutoSpeak(!autoSpeak)"><i></i></button>
+      </div>
+      <p v-if="playbackNotice" class="voice-notice" role="status">{{ playbackNotice }}</p>
+      <div class="voice-toolbar">
+        <button class="voice-action" :disabled="busy || generating" @click="startRecording">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 11v1a7 7 0 0 0 14 0v-1 M12 19v3 M8 22h8" /></svg>
+          语音输入
+        </button>
+        <button class="voice-action" :disabled="busy || generating" @click="audioInput.click()">上传音频</button>
+        <span>转文字后发送</span>
+        <input ref="audioInput" hidden type="file" accept="audio/*,.webm,.m4a,.amr" @change="uploadAudio" />
+      </div>
+      <div v-if="busy" class="voice-panel" role="status" aria-live="polite">
+        <span class="voice-dot" :class="{ recording: recordingState === 'recording' }"></span>
+        <span>{{ recordingState === 'recording' ? `正在聆听 ${seconds}s / 60s` : recordingState === 'requesting' ? '请允许使用麦克风…' : '正在转成文字…' }}</span>
+        <button v-if="recordingState === 'recording'" class="voice-finish" @click="finishRecording">完成录音</button>
+        <button class="voice-cancel" @click="cancelRecording">取消</button>
+      </div>
+      <p v-if="notice || micHint" class="voice-notice" role="status">{{ notice || micHint }}</p>
       <div class="input-row">
         <div class="input-wrap">
           <textarea
             v-model="inputText"
             class="chat-input"
             :auto-height="true"
-            maxlength="160"
+            maxlength="2000"
+            :disabled="busy"
             rows="1"
             :placeholder="placeholder"
             @keydown.enter.exact.prevent="sendMessage"
@@ -276,7 +305,7 @@
           v-else
           class="send"
           aria-label="发送"
-          :disabled="!inputText.trim()"
+          :disabled="!inputText.trim() || busy"
           @click="sendMessage"
         >
           <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h11" /><path d="M10.6 5.6 15 10l-4.4 4.4" /></svg>
@@ -296,11 +325,12 @@ import store, { addToCart, saveDiyPlan, yuan } from '@/store'
 import AdvisorCards from '@/components/AdvisorCards.vue'
 import {
   chatWithAdvisor, streamAdvisorChat, pollAgentTask, normalizeAgentAssetUrl,
-  isAgentRateLimited, ADVISOR_PRESETS, AGENT_CONFIG, listAgentConversations, fetchAgentMessages
+  isAgentRateLimited, ADVISOR_PRESETS, AGENT_CONFIG, listAgentConversations, fetchAgentMessages, deleteAgentConversation, saveAccountDiyPlan
 } from '@/mock/api'
 import { mergeAgentMessages, slimMessage, extractImageTaskId } from '@/utils/advisorHistory'
 import { ensureCity, cityShopIds, filterAgentMessageByCity } from '@/utils/city'
 import { toast } from '@/utils/toast'
+import { useAdvisorSpeech } from '@/composables/useAdvisorSpeech'
 
 const router = useRouter()
 const route = useRoute()
@@ -397,6 +427,12 @@ const STORAGE_KEY = 'twd_advisor_convos'
 const conversations = ref([])
 const activeId = ref('')
 const drawerOpen = ref(false)
+const deletingSessions = new Set()
+const audioInput = ref(null)
+const { recordingState, seconds, notice, busy, micHint, playingMessage, playbackState,
+  autoSpeak, playbackNotice, setAutoSpeak, autoPlayReply, unlockPlayback,
+  startRecording, finishRecording, cancelRecording, uploadAudio, toggleReply, stopPlayback
+} = useAdvisorSpeech({ inputText, activeId, generating })
 
 function uid() {
   return 'c_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
@@ -477,15 +513,31 @@ function selectConversation(id) {
   resumeImageTasks(c.messages) // 接着查没出图的效果图任务
 }
 
-function deleteConversation(id) {
+async function deleteConversation(id) {
   const idx = conversations.value.findIndex(c => c.id === id)
   if (idx < 0) return
+  const target = conversations.value[idx]
+  if (target.sessionId && deletingSessions.has(target.sessionId)) return
+  if (target.sessionId) deletingSessions.add(target.sessionId)
+  // 服务端会话必须先删除，否则页面重新打开时 syncFromAgent 会再次拉回来。
+  if (target.sessionId && store.isLogged && store.token) {
+    try {
+      await deleteAgentConversation(target.sessionId)
+    } catch (e) {
+      console.warn('[advisor] 服务端会话删除失败：', e && e.message)
+      toast('删除失败，请稍后重试')
+      deletingSessions.delete(target.sessionId)
+      return
+    }
+  }
   conversations.value.splice(idx, 1)
   if (activeId.value === id) {
     if (conversations.value.length) selectConversation(conversations.value[0].id)
     else newConversation()
   }
   saveConversations()
+  if (target.sessionId) deletingSessions.delete(target.sessionId)
+  toast('对话已删除')
 }
 
 function renameConversation(id) {
@@ -513,12 +565,13 @@ function scrollToBottom() {
 }
 
 function usePreset(p) {
+  if (busy.value || generating.value) return
   inputText.value = p.prompt
   sendMessage()
 }
 
 function sendOption(value) {
-  if (generating.value) return
+  if (generating.value || busy.value) return
   inputText.value = value
   sendMessage()
 }
@@ -535,7 +588,9 @@ function toolLabel(name) {
 
 async function sendMessage() {
   const text = (inputText.value || '').trim()
-  if (!text || generating.value) return
+   if (!text || generating.value || busy.value) return
+   stopPlayback()
+   if (autoSpeak.value) unlockPlayback()
   const conv = conversations.value.find(c => c.id === activeId.value)
   messages.value.push({ role: 'user', text })
   if (conv && conv.title === '新对话') conv.title = text.slice(0, 12)
@@ -549,7 +604,9 @@ async function sendMessage() {
     role: 'ai', text: '', cards: [], tools: [], streaming: true,
     image: '', poll: null, thinkText: THINK_STAGES[0], thinkElapsed: 0
   })
-  const cur = () => messages.value[idx]
+  const replyMessages = messages.value
+  const replyConversationId = activeId.value
+  const cur = () => replyMessages[idx]
   const set = patch => Object.assign(cur(), patch)
   startThinking(cur())
 
@@ -598,6 +655,7 @@ async function sendMessage() {
           scrollToBottom()
         } else if (ev.event === 'done') {
           const d = ev.data || {}
+          if (typeof d.speech_text === 'string') set({ speechText: d.speech_text })
           if (d.session_id) sessionId.value = d.session_id
           // 🔴 `done.reply` 是**权威终稿**：平台在它上面跑过清理链（危险标签转义、独白替换、
           //    卡片要点追加），而流式推的是模型原始输出。所以这里以 reply 为准覆盖已累加的文字。
@@ -650,7 +708,9 @@ async function sendMessage() {
         sessionId.value = result.sessionId || sessionId.value
         set({
           text: result.reply,
-          plans: result.plans || [],
+          speechText: result.speechText || '',
+          cards: result.cards || [],
+          plans: result.cards?.length ? [] : (result.plans || []),
           products: result.products || [],
           options: result.options || [],
           poll: result.poll || null
@@ -671,6 +731,7 @@ async function sendMessage() {
   } finally {
     stopThinking()
     set({ streaming: false })
+    if (!stopped.value && activeId.value === replyConversationId) autoPlayReply(cur())
     generating.value = false
     abortCtl.value = null
     if (conv) {
@@ -905,7 +966,7 @@ function startImagePoll(msg, data) {
       return
     }
     const taskId = String(d.task_id || '').trim()
-    const poll = String(d.poll || '').trim() || (taskId ? ('/tasks/' + taskId) : '')
+    const poll = (typeof d.poll === 'string' ? d.poll.trim() : '') || (taskId ? ('/tasks/' + taskId) : '')
     if (!poll) return
     msg.poll = poll
   }
@@ -934,6 +995,7 @@ function startImagePoll(msg, data) {
       msg.imageStatus = 'failed'
       msg.imageError = '效果图生成超时，请稍后重新生成方案'
     }
+    saveConversations()
   })
 }
 
@@ -953,9 +1015,14 @@ function attachImageTaskFromText(msg) {
 }
 
 // DIY 方案「保存到我的方案」 → store（localStorage 持久化，见「我的 → 我的方案」）
-function onSaveDiyPlan(plan) {
+async function onSaveDiyPlan(plan) {
   if (!plan || !plan.id) { toast('方案数据缺失，保存失败'); return }
-  const ok = saveDiyPlan({
+  if (!store.isLogged || !store.token) {
+    toast('请先登录后保存方案')
+    router.push({ name: 'login', query: { redirect: route.fullPath } })
+    return
+  }
+  const localPlan = {
     id: plan.id,
     name: plan.name,
     desc: plan.desc,
@@ -963,12 +1030,28 @@ function onSaveDiyPlan(plan) {
     image: plan.coverImage,
     materials: plan.mainFlowers,
     budget: plan.budgetRows,
+    colorScheme: plan.colorScheme,
+    packaging: plan.packaging,
+    meaning: plan.meaning,
+    steps: plan.steps,
+    caution: plan.caution,
+    feeNote: plan.feeNote,
+    stemCount: plan.stemCount,
+    copyText: plan.copyText,
+    totalNum: plan.totalNum,
+    priceText: plan.priceText,
     careTips: plan.careTips,
     greeting: plan.greeting,
     skillLevel: plan.skillLevel,
     suitableFor: plan.suitableFor
-  })
-  toast(ok ? '已保存到「我的方案」' : '保存失败，请稍后再试')
+  }
+  try {
+    await saveAccountDiyPlan({ ...localPlan, plan_id: localPlan.id })
+    const ok = saveDiyPlan(localPlan)
+    toast(ok ? '已保存到「我的方案」' : '保存失败，请稍后再试')
+  } catch (e) {
+    toast((e && e.message) || '方案保存失败，请稍后重试')
+  }
 }
 
 
@@ -990,14 +1073,14 @@ async function syncFromAgent() {
     let added = 0
     for (const item of list.slice(0, 20)) {
       const sid = String((item && item.id) || '')
-      if (!sid) continue
+      if (!sid || deletingSessions.has(sid)) continue
       let msgs = []
       try {
         msgs = await fetchAgentMessages(sid)
       } catch (e) {
         continue // 单个会话拉取失败不影响其它
       }
-      if (!msgs.length) continue
+      if (!msgs.length || deletingSessions.has(sid)) continue
       const updatedAt = Date.parse((item && item.updated_at) || '') || Date.now()
       const exist = bySession.get(sid)
       if (exist) {
@@ -1048,6 +1131,30 @@ onMounted(() => {
 </script>
 
 <style scoped lang="scss">
+.speech-setting { display: flex; align-items: center; justify-content: space-between; gap: rpx(16); margin-bottom: rpx(18); color: var(--moss); font-size: rpx(24); }
+.speech-setting small { margin-left: rpx(12); font-size: rpx(20); color: var(--ink-3); }
+.speech-switch { width: rpx(76); height: rpx(44); flex: none; border: 1px solid var(--line-2); border-radius: rpx(99); padding: rpx(4); background: var(--paper-3); cursor: pointer; }
+.speech-switch i { display: block; width: rpx(32); height: rpx(32); border-radius: 50%; background: white; box-shadow: 0 1px 3px #0002; transition: transform .2s; }
+.speech-switch[aria-checked="true"] { background: var(--moss); border-color: var(--moss); }
+.speech-switch[aria-checked="true"] i { transform: translateX(rpx(30)); }
+.speech-switch:focus-visible { outline: 2px solid var(--brass); outline-offset: 3px; }
+.voice-toolbar { display: flex; align-items: center; gap: rpx(18); margin-bottom: rpx(14); }
+.voice-toolbar > span { margin-left: auto; font-size: rpx(20); color: var(--ink-3); }
+.voice-action, .speech-reply { display: inline-flex; align-items: center; gap: rpx(10); border: 1px solid var(--line-2); border-radius: rpx(999); background: var(--paper-2); color: var(--moss); padding: rpx(12) rpx(18); font: inherit; font-size: rpx(22); cursor: pointer; }
+.voice-action:disabled { opacity: .45; cursor: default; }
+.voice-action svg, .speech-reply svg { width: rpx(28); height: rpx(28); fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.speech-reply { margin-top: rpx(16); }
+.speech-reply[aria-pressed="true"] { background: #e7eee7; border-color: var(--moss-3); }
+.speech-reply small { color: var(--ink-3); font-size: rpx(18); }
+.voice-panel { display: flex; align-items: center; gap: rpx(12); padding: rpx(18); margin-bottom: rpx(14); border: 1px solid var(--line-2); border-radius: rpx(18); background: var(--paper-2); font-size: rpx(24); }
+.voice-dot { width: rpx(12); height: rpx(12); border-radius: 50%; background: var(--brass); flex: none; }
+.voice-dot.recording { background: var(--danger); }
+.voice-panel button { font: inherit; border-radius: rpx(12); padding: rpx(10) rpx(14); cursor: pointer; }
+.voice-finish { margin-left: auto; background: var(--moss); color: white; border: 0; }
+.voice-cancel { margin-left: auto; border: 1px solid var(--line-2); color: var(--ink-2); background: transparent; }
+.voice-finish + .voice-cancel { margin-left: 0; }
+.voice-notice { font-size: rpx(21); color: var(--ink-2); margin: 0 0 rpx(14); line-height: 1.6; }
+.voice-action:focus-visible, .speech-reply:focus-visible, .voice-panel button:focus-visible { outline: 2px solid var(--moss-3); outline-offset: 3px; }
 /* 🔧 诊断面板（仅 ?diag=1）—— 深色等宽小字，便于截图比对 */
 .diag {
   flex: none;
